@@ -1,7 +1,8 @@
 (ns is.simm.repl-mcp.tools.structural-edit
   (:require [is.simm.repl-mcp.interactive :refer [register-tool!]]
             [is.simm.repl-mcp.structural-edit :as edit]
-            [clojure.edn :as edn]))
+            [clojure.edn :as edn]
+            [rewrite-clj.zip :as z]))
 
 ;; =============================================================================
 ;; STRUCTURAL EDITING TOOLS - ESSENTIAL ONLY
@@ -76,7 +77,26 @@
    :new-expression {:type "string" :description "New expression to replace current node"}}
   (fn [tool-call context]
     (let [{:strs [session-id new-expression]} (:args tool-call)]
-      (edit/replace-node session-id (edn/read-string new-expression)))))
+      ;; Use rewrite-clj parsing to preserve formatting instead of edn/read-string
+      (edit/replace-node session-id (z/node (z/of-string new-expression))))))
+
+(register-tool! :structural-insert-after
+  "Insert expression after current node with proper formatting"
+  {:session-id {:type "string" :description "Session identifier"}
+   :new-expression {:type "string" :description "New expression to insert after current node"}}
+  (fn [tool-call context]
+    (let [{:strs [session-id new-expression]} (:args tool-call)]
+      ;; Use rewrite-clj parsing to preserve formatting
+      (edit/insert-after session-id (z/node (z/of-string new-expression))))))
+
+(register-tool! :structural-insert-before
+  "Insert expression before current node with proper formatting"
+  {:session-id {:type "string" :description "Session identifier"}
+   :new-expression {:type "string" :description "New expression to insert before current node"}}
+  (fn [tool-call context]
+    (let [{:strs [session-id new-expression]} (:args tool-call)]
+      ;; Use rewrite-clj parsing to preserve formatting
+      (edit/insert-before session-id (z/node (z/of-string new-expression))))))
 
 (register-tool! :structural-bulk-find-and-replace
   "Find and replace all occurrences of a pattern with enhanced symbol matching"

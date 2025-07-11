@@ -11,4 +11,17 @@
   [name]
   (str/upper-case name))
 
-(defn main-function "Main processing function" [input] (let [sum (sum-values 1 2) name (process-name (:name input))] {:sum sum, :name name, :processed true}))
+(defn main-function
+  "Main processing function"
+  [input]
+  (let [sum (sum-values 1 2)
+        name (process-name (:name input))]
+    {:sum sum
+     :name name
+     :processed true}))
+
+(defn extract-names-and-jobs
+  "Extract names and jobs from a sequence of maps into separate sets"
+  [person-maps]
+  {:names (set (map :name person-maps))
+   :jobs (set (map :job person-maps))})

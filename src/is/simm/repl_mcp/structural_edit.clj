@@ -751,10 +751,10 @@
                                 (let [target-zloc (navigate-to-path-internal current-zloc (:path op))]
                                   (if target-zloc
                                     (case (:type op)
-                                      :insert-after (z/insert-right target-zloc (edn/read-string (:content op)))
-                                      :insert-before (z/insert-left target-zloc (edn/read-string (:content op)))
-                                      :insert-child (z/insert-child target-zloc (edn/read-string (:content op)))
-                                      :replace (z/replace target-zloc (edn/read-string (:content op)))
+                                      :insert-after (z/insert-right target-zloc (z/node (z/of-string (:content op))))
+                                      :insert-before (z/insert-left target-zloc (z/node (z/of-string (:content op))))
+                                      :insert-child (z/insert-child target-zloc (z/node (z/of-string (:content op))))
+                                      :replace (z/replace target-zloc (z/node (z/of-string (:content op))))
                                       current-zloc)
                                     current-zloc)))
                               zloc sorted-ops)]
