@@ -1,0 +1,143 @@
+# Test-Driven Development Workflow
+
+You are helping with a Test-Driven Development (TDD) workflow for Clojure. This prompt guides you through the Red-Green-Refactor cycle.
+
+## Function Information
+- **Function Name**: {{function-name}}
+- **Namespace**: {{namespace}}
+- **Description**: {{description}}
+
+## TDD Workflow Steps
+
+### 1. 🔴 RED Phase - Write Failing Tests
+First, create tests that define the expected behavior:
+
+1. **Generate Test Skeleton**:
+   Use the `create-test-skeleton` tool to generate comprehensive test cases:
+   ```
+   Tool: create-test-skeleton
+   - function-name: {{function-name}}
+   - namespace-name: {{namespace}}
+   ```
+
+2. **Define Specific Test Cases**:
+   Consider these testing scenarios:
+   - **Happy path**: Normal inputs and expected outputs
+   - **Edge cases**: Boundary conditions, empty inputs, nil values
+   - **Error cases**: Invalid inputs, exceptions
+   - **Integration**: How the function works with other functions
+
+3. **Run Tests** (should fail initially):
+   ```
+   Tool: test-var-query
+   - var-query: {{namespace}}-test/{{function-name}}-test
+   ```
+
+### 2. 🟢 GREEN Phase - Make Tests Pass
+Write the minimal code to make tests pass:
+
+1. **Implement Function**:
+   Use the `eval` tool to experiment with implementation:
+   ```
+   Tool: eval
+   - code: (defn {{function-name}} [args] 
+             ;; Minimal implementation
+             )
+   ```
+
+2. **Verify Implementation**:
+   Test individual expressions and logic:
+   ```
+   Tool: eval
+   - code: ({{function-name}} test-input)
+   ```
+
+3. **Run Tests Again**:
+   ```
+   Tool: test-var-query
+   - var-query: {{namespace}}-test/{{function-name}}-test
+   ```
+
+### 3. 🔵 REFACTOR Phase - Improve Code Quality
+Once tests pass, improve the code:
+
+1. **Code Quality Check**:
+   Use structural editing to improve code structure:
+   ```
+   Tool: format-code
+   - code: your-function-code
+   ```
+
+2. **Extract Functions** (if needed):
+   ```
+   Tool: extract-function
+   - session-id: refactor-session
+   - function-name: helper-function-name
+   ```
+
+3. **Clean Namespace**:
+   ```
+   Tool: clean-ns
+   - file-path: path/to/your/file.clj
+   ```
+
+4. **Run Full Test Suite**:
+   ```
+   Tool: test-all
+   ```
+
+## Best Practices
+
+### Test Design
+- **Start Simple**: Begin with the simplest possible test case
+- **One Assertion**: Each test should verify one specific behavior
+- **Descriptive Names**: Test names should clearly describe what they verify
+- **Given-When-Then**: Structure tests with clear setup, action, and assertion
+
+### Implementation Strategy
+- **Fake It Till You Make It**: Start with hardcoded returns, then generalize
+- **Triangulation**: Add multiple test cases to drive toward the general solution
+- **Obvious Implementation**: If the solution is obvious, implement it directly
+
+### Refactoring Guidelines
+- **Green Bar**: Only refactor when all tests are passing
+- **Small Steps**: Make incremental improvements
+- **Test Coverage**: Ensure refactoring doesn't break existing functionality
+
+## Example TDD Session
+
+```clojure
+;; 1. RED: Write failing test
+(deftest calculate-sum-test
+  (testing "adds two numbers"
+    (is (= 5 (calculate-sum 2 3)))))
+
+;; 2. GREEN: Minimal implementation
+(defn calculate-sum [a b]
+  5) ; Hardcoded to pass test
+
+;; 3. Add more tests (RED)
+(deftest calculate-sum-test
+  (testing "adds two numbers"
+    (is (= 5 (calculate-sum 2 3)))
+    (is (= 7 (calculate-sum 3 4))))) ; This will fail
+
+;; 4. GREEN: Generalize implementation
+(defn calculate-sum [a b]
+  (+ a b))
+
+;; 5. REFACTOR: Add validation, improve structure
+(defn calculate-sum
+  "Calculates the sum of two numbers"
+  [a b]
+  {:pre [(number? a) (number? b)]}
+  (+ a b))
+```
+
+## Next Steps
+1. Start with the RED phase - create your failing tests
+2. Move to GREEN phase - implement minimal working code
+3. Enter REFACTOR phase - improve code quality while keeping tests green
+4. Repeat the cycle for additional functionality
+
+Remember: **Red → Green → Refactor** - this cycle is the heart of TDD!

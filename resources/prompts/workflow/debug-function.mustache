@@ -1,0 +1,256 @@
+# Debug Function Workflow
+
+You are helping debug a Clojure function that's not working as expected. This prompt guides you through systematic debugging steps.
+
+## Function Information
+- **Function Name**: {{function-name}}
+- **Namespace**: {{namespace}}
+- **Issue Description**: {{issue}}
+- **Expected Behavior**: {{expected}}
+- **Actual Behavior**: {{actual}}
+
+## 🔍 Systematic Debugging Workflow
+
+### Step 1: Gather Information
+Start by understanding the function and its context:
+
+1. **Locate the Function**:
+   ```
+   Tool: find-function-definition
+   - file-path: {{file-path}}
+   - function-name: {{function-name}}
+   ```
+
+2. **Get Function Details**:
+   ```
+   Tool: enhanced-info
+   - symbol: {{namespace}}/{{function-name}}
+   ```
+
+3. **Check Function Usage**:
+   ```
+   Tool: find-function-usages-in-project
+   - project-root: {{project-root}}
+   - function-name: {{function-name}}
+   ```
+
+### Step 2: Reproduce the Issue
+Create a controlled environment to reproduce the problem:
+
+1. **Load the Namespace**:
+   ```
+   Tool: eval
+   - code: (require '[{{namespace}} :reload])
+   ```
+
+2. **Test the Problematic Input**:
+   ```
+   Tool: eval
+   - code: ({{namespace}}/{{function-name}} {{test-input}})
+   ```
+
+3. **Compare with Expected**:
+   ```
+   Tool: eval
+   - code: (= {{expected-output}} ({{namespace}}/{{function-name}} {{test-input}}))
+   ```
+
+### Step 3: Analyze with Stack Traces
+When errors occur, capture full debugging information:
+
+1. **Capture Stack Trace**:
+   ```
+   Tool: eval
+   - code: (try ({{namespace}}/{{function-name}} {{test-input}})
+             (catch Exception e 
+               (with-out-str (clojure.stacktrace/print-stack-trace e))))
+   ```
+
+2. **Analyze Exception Details**:
+   ```
+   Tool: eval
+   - code: (try ({{namespace}}/{{function-name}} {{test-input}})
+             (catch Exception e 
+               {:message (.getMessage e)
+                :type (type e)
+                :data (ex-data e)}))
+   ```
+
+### Step 4: Inspect Function Internals
+Break down the function to understand what's happening:
+
+1. **Extract Function Body**:
+   Use structural editing to examine the function:
+   ```
+   Tool: structural-create-session
+   - session-id: debug-session
+   - source: {{file-path}}
+   - from-file: true
+   ```
+
+2. **Navigate to Function**:
+   ```
+   Tool: structural-find-symbol-enhanced
+   - session-id: debug-session
+   - symbol-name: {{function-name}}
+   ```
+
+3. **Get Function Structure**:
+   ```
+   Tool: structural-get-info
+   - session-id: debug-session
+   ```
+
+### Step 5: Test Individual Components
+Break the function into parts and test each:
+
+1. **Test Function Arguments**:
+   ```
+   Tool: eval
+   - code: (let [arg1 {{test-arg1}} arg2 {{test-arg2}}]
+             {:arg1 arg1 :arg2 arg2 :types [(type arg1) (type arg2)]})
+   ```
+
+2. **Test Intermediate Results**:
+   Extract key expressions from the function and test them individually:
+   ```
+   Tool: eval
+   - code: (let [{{intermediate-binding}}]
+             {{intermediate-expression}})
+   ```
+
+### Step 6: Check Dependencies
+Verify that dependencies are working correctly:
+
+1. **Check Required Namespaces**:
+   ```
+   Tool: ns-vars
+   - ns: {{dependency-namespace}}
+   ```
+
+2. **Test Dependency Functions**:
+   ```
+   Tool: eval
+   - code: ({{dependency-namespace}}/{{dependency-function}} {{test-args}})
+   ```
+
+3. **Verify Classpath**:
+   ```
+   Tool: classpath
+   ```
+
+### Step 7: Validate Assumptions
+Test your assumptions about the function's behavior:
+
+1. **Check Preconditions**:
+   ```
+   Tool: eval
+   - code: (let [input {{test-input}}]
+             {:input input
+              :type (type input)
+              :valid? {{validation-expression}}})
+   ```
+
+2. **Verify Data Transformations**:
+   ```
+   Tool: eval
+   - code: (->> {{test-input}}
+                {{transformation-step-1}}
+                {{transformation-step-2}}
+                (hash-map :result))
+   ```
+
+## 🔧 Common Debugging Patterns
+
+### Nil Pointer Issues
+```clojure
+Tool: eval
+- code: (let [data {{suspicious-data}}]
+          {:data data
+           :nil-keys (->> data 
+                         (filter #(nil? (val %)))
+                         (map key))})
+```
+
+### Type Mismatches
+```clojure
+Tool: eval
+- code: (let [value {{problematic-value}}]
+          {:value value
+           :type (type value)
+           :expected-type {{expected-type}}
+           :matches? (instance? {{expected-type}} value)})
+```
+
+### Collection Issues
+```clojure
+Tool: eval
+- code: (let [coll {{collection}}]
+          {:collection coll
+           :count (count coll)
+           :empty? (empty? coll)
+           :first (first coll)
+           :type (type coll)})
+```
+
+### Function Composition Issues
+```clojure
+Tool: eval
+- code: (-> {{input}}
+            ({{step-1}})
+            (hash-map :after-step-1)
+            (merge (-> {{input}} 
+                      ({{step-1}}) 
+                      ({{step-2}})
+                      (hash-map :after-step-2))))
+```
+
+## 📝 Debugging Checklist
+
+### Data Flow
+- [ ] Input validation: Are inputs what you expect?
+- [ ] Type checking: Are types correct throughout?
+- [ ] Nil handling: Are nil values handled properly?
+- [ ] Collection operations: Are collections modified correctly?
+
+### Control Flow  
+- [ ] Conditional logic: Do if/when/case statements work correctly?
+- [ ] Loop behavior: Do loops terminate and iterate correctly?
+- [ ] Exception handling: Are errors caught and handled appropriately?
+- [ ] Return values: Does the function return what's expected?
+
+### Dependencies
+- [ ] Namespace imports: Are all required namespaces available?
+- [ ] Function availability: Are called functions defined and accessible?
+- [ ] Library versions: Are correct library versions being used?
+- [ ] Configuration: Are configuration values correct?
+
+## 🎯 Resolution Strategies
+
+### Once You Find the Issue:
+
+1. **Fix and Test**:
+   ```
+   Tool: eval
+   - code: (defn {{function-name}} [{{fixed-args}}] {{fixed-body}})
+   ```
+
+2. **Run Tests**:
+   ```
+   Tool: test-var-query
+   - var-query: {{namespace}}-test/{{function-name}}-test
+   ```
+
+3. **Validate Fix**:
+   ```
+   Tool: eval
+   - code: ({{namespace}}/{{function-name}} {{original-problem-input}})
+   ```
+
+4. **Format and Clean**:
+   ```
+   Tool: format-code
+   - code: {{fixed-function-code}}
+   ```
+
+Remember: **Debug systematically** - gather information, reproduce issues, analyze step by step, and validate your fixes!

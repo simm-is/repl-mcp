@@ -1,0 +1,279 @@
+# Refactor: Extract Function Workflow
+
+You are helping extract a function from existing code to improve code organization and reusability. This prompt guides you through safe function extraction.
+
+## Target Information
+- **Source Function**: {{source-function}}
+- **Source Namespace**: {{namespace}}
+- **New Function Name**: {{new-function-name}}
+- **Code to Extract**: {{code-to-extract}}
+- **File Path**: {{file-path}}
+
+## 🔧 Safe Function Extraction Workflow
+
+### Step 1: Analyze Current Code
+Understand the context and dependencies of the code to extract:
+
+1. **Locate Source Function**:
+   ```
+   Tool: find-function-definition
+   - file-path: {{file-path}}
+   - function-name: {{source-function}}
+   ```
+
+2. **Create Structural Session**:
+   ```
+   Tool: structural-create-session
+   - session-id: extract-session
+   - source: {{file-path}}
+   - from-file: true
+   ```
+
+3. **Navigate to Target Code**:
+   ```
+   Tool: structural-find-symbol-enhanced
+   - session-id: extract-session
+   - symbol-name: {{source-function}}
+   ```
+
+### Step 2: Identify Dependencies
+Analyze what the extracted code depends on:
+
+1. **Find Local Variables**:
+   ```
+   Tool: find-used-locals
+   - file-path: {{file-path}}
+   - line: {{target-line}}
+   - column: {{target-column}}
+   ```
+
+2. **Analyze Variable Usage**:
+   ```
+   Tool: eval
+   - code: ;; Test what variables are used in the target code
+           (let [test-code '{{code-to-extract}}]
+             (->> test-code
+                  (tree-seq coll? identity)
+                  (filter symbol?)
+                  (distinct)
+                  (vec)))
+   ```
+
+### Step 3: Design New Function Signature
+Plan the new function's interface:
+
+1. **Determine Parameters**:
+   ```
+   Tool: eval
+   - code: ;; Analyze required parameters
+           {:parameters [{{identified-params}}]
+            :return-type {{expected-return-type}}
+            :description "{{function-description}}"}
+   ```
+
+2. **Test Parameter Types**:
+   ```
+   Tool: eval
+   - code: (let [{{param-1}} {{test-value-1}}
+                 {{param-2}} {{test-value-2}}]
+             {:param-types [(type {{param-1}}) (type {{param-2}})]
+              :test-execution {{code-to-extract}}})
+   ```
+
+### Step 4: Extract the Function
+Use structural editing to safely extract the code:
+
+1. **Extract Using Structural Editing**:
+   ```
+   Tool: extract-function
+   - session-id: extract-session
+   - function-name: {{new-function-name}}
+   - parameters: {{function-parameters}}
+   ```
+
+2. **Verify Extraction**:
+   ```
+   Tool: structural-get-info
+   - session-id: extract-session
+   ```
+
+### Step 5: Test the Extracted Function
+Ensure the extraction works correctly:
+
+1. **Save and Load**:
+   ```
+   Tool: structural-save-session
+   - session-id: extract-session
+   ```
+
+2. **Reload Namespace**:
+   ```
+   Tool: eval
+   - code: (require '[{{namespace}} :reload])
+   ```
+
+3. **Test New Function**:
+   ```
+   Tool: eval
+   - code: ({{namespace}}/{{new-function-name}} {{test-args}})
+   ```
+
+4. **Test Original Function**:
+   ```
+   Tool: eval
+   - code: ({{namespace}}/{{source-function}} {{original-test-args}})
+   ```
+
+### Step 6: Verify No Regressions
+Make sure the extraction doesn't break existing functionality:
+
+1. **Run Related Tests**:
+   ```
+   Tool: test-var-query
+   - var-query: {{namespace}}-test/{{source-function}}-test
+   ```
+
+2. **Find All Function Usages**:
+   ```
+   Tool: find-function-usages-in-project
+   - project-root: {{project-root}}
+   - function-name: {{source-function}}
+   ```
+
+3. **Run Full Test Suite**:
+   ```
+   Tool: test-all
+   ```
+
+### Step 7: Clean Up and Document
+Improve the extracted function's quality:
+
+1. **Format Code**:
+   ```
+   Tool: format-code
+   - code: {{extracted-function-code}}
+   ```
+
+2. **Add Documentation**:
+   ```
+   Tool: eval
+   - code: (defn {{new-function-name}}
+             "{{function-description}}"
+             {{function-signature}}
+             {{function-body}})
+   ```
+
+3. **Clean Namespace**:
+   ```
+   Tool: clean-ns
+   - file-path: {{file-path}}
+   ```
+
+## 🎯 Extraction Patterns
+
+### Pure Function Extraction
+For code without side effects:
+```clojure
+;; Before
+(defn calculate-report [data]
+  (let [filtered-data (filter #(> (:score %) 80) data)
+        sorted-data (sort-by :name filtered-data)
+        formatted-data (map format-entry sorted-data)]
+    {:report formatted-data :count (count formatted-data)}))
+
+;; After extraction
+(defn filter-high-scores [data threshold]
+  (filter #(> (:score %) threshold) data))
+
+(defn calculate-report [data]
+  (let [filtered-data (filter-high-scores data 80)
+        sorted-data (sort-by :name filtered-data)
+        formatted-data (map format-entry sorted-data)]
+    {:report formatted-data :count (count formatted-data)}))
+```
+
+### Stateful Function Extraction
+For code with side effects:
+```clojure
+;; Before
+(defn process-file [filename]
+  (let [data (slurp filename)
+        parsed (parse-csv data)
+        validated (validate-data parsed)]
+    (spit (str filename ".processed") (generate-report validated))
+    validated))
+
+;; After extraction  
+(defn validate-and-report [data filename]
+  (let [validated (validate-data data)]
+    (spit (str filename ".processed") (generate-report validated))
+    validated))
+
+(defn process-file [filename]
+  (let [data (slurp filename)
+        parsed (parse-csv data)]
+    (validate-and-report parsed filename)))
+```
+
+### Complex Logic Extraction
+For nested or complex logic:
+```clojure
+;; Before
+(defn complex-calculation [x y z]
+  (if (and (> x 0) (< y 100))
+    (let [intermediate (* x y)
+          adjusted (if (even? z) 
+                    (+ intermediate z)
+                    (- intermediate z))]
+      (Math/sqrt adjusted))
+    0))
+
+;; After extraction
+(defn calculate-adjusted-value [x y z]
+  (let [intermediate (* x y)]
+    (if (even? z) 
+      (+ intermediate z)
+      (- intermediate z))))
+
+(defn complex-calculation [x y z]
+  (if (and (> x 0) (< y 100))
+    (Math/sqrt (calculate-adjusted-value x y z))
+    0))
+```
+
+## ✅ Extraction Checklist
+
+### Before Extraction
+- [ ] Identify clear boundaries for extraction
+- [ ] Understand all dependencies (variables, functions)
+- [ ] Plan the new function's signature
+- [ ] Ensure extracted code has single responsibility
+
+### During Extraction
+- [ ] Use structural editing tools for safe manipulation
+- [ ] Preserve existing behavior exactly
+- [ ] Choose descriptive function name
+- [ ] Define clear parameter list
+
+### After Extraction
+- [ ] Test both new and modified functions
+- [ ] Verify no regressions in existing code
+- [ ] Add appropriate documentation
+- [ ] Run full test suite
+- [ ] Consider extracting more if beneficial
+
+## 🚀 Benefits of Function Extraction
+
+### Code Quality
+- **Single Responsibility**: Each function does one thing well
+- **Reusability**: Extracted functions can be used elsewhere
+- **Testability**: Smaller functions are easier to test
+- **Readability**: Main function becomes more readable
+
+### Maintenance
+- **Debugging**: Smaller functions are easier to debug
+- **Modification**: Changes are localized to specific functions
+- **Understanding**: Code intent becomes clearer
+- **Refactoring**: Further improvements become easier
+
+Remember: **Extract incrementally** - make small, safe changes and test frequently!

@@ -1,0 +1,43 @@
+{:paths ["src" "resources"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.1"}
+        io.modelcontextprotocol.sdk/mcp {:mvn/version "0.10.0"}
+        com.rpl/specter {:mvn/version "1.1.4"}
+        org.clojure/data.json {:mvn/version "2.4.0"}
+        pogonos/pogonos {:mvn/version "0.2.1"}
+        ;; logging
+        com.taoensso/telemere {:mvn/version "1.0.1"}}
+ :aliases
+ {:repl-mcp {:main-opts ["-m" "is.simm.repl-mcp"]
+             :extra-deps {nrepl/nrepl {:mvn/version "1.0.0"}
+                          cider/cider-nrepl {:mvn/version "0.47.1"}
+                          rewrite-clj/rewrite-clj {:mvn/version "1.1.47"}
+                          refactor-nrepl/refactor-nrepl {:mvn/version "3.10.0"}
+                          dev.weavejester/cljfmt {:mvn/version "0.13.1"}
+
+                          org.slf4j/slf4j-api {:mvn/version "2.0.17"}
+                          org.slf4j/slf4j-nop {:mvn/version "2.0.17"}  ; No-operation SLF4J provider to suppress warnings
+                          ;; HTTP server dependencies for SSE transport
+                          org.eclipse.jetty.ee10/jetty-ee10-servlet {:mvn/version "12.0.5"}
+                          org.eclipse.jetty/jetty-server {:mvn/version "12.0.5"}
+                          jakarta.servlet/jakarta.servlet-api {:mvn/version "6.0.0"}}}
+  :build {:deps {io.github.clojure/tools.build
+                 {:mvn/version "0.10.9"}}
+          :ns-default build}
+  :test {:extra-paths ["test"]
+         :extra-deps {io.github.cognitect-labs/test-runner
+                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}
+
+                      nrepl/nrepl {:mvn/version "1.0.0"}
+                      cider/cider-nrepl {:mvn/version "0.47.1"}
+                      rewrite-clj/rewrite-clj {:mvn/version "1.1.47"}
+                      refactor-nrepl/refactor-nrepl {:mvn/version "3.10.0"}
+                      dev.weavejester/cljfmt {:mvn/version "0.13.1"}
+
+                      org.slf4j/slf4j-api {:mvn/version "2.0.17"}
+                      org.slf4j/slf4j-nop {:mvn/version "2.0.17"}  ; No-operation SLF4J provider to suppress warnings
+                      ;; HTTP server dependencies for SSE transport
+                      org.eclipse.jetty.ee10/jetty-ee10-servlet {:mvn/version "12.0.5"}
+                      org.eclipse.jetty/jetty-server {:mvn/version "12.0.5"}
+                      jakarta.servlet/jakarta.servlet-api {:mvn/version "6.0.0"}}
+         :main-opts ["-m" "cognitect.test-runner"]
+         :exec-fn cognitect.test-runner.api/test}}}
