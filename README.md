@@ -19,7 +19,7 @@ Create project-specific tools interactively for reliable, predictable workflows.
 Add repl-mcp to your `deps.edn` dependencies and include the `:repl-mcp` alias (copy it from our deps.edn):
 
 ```clojure
-{:deps {is.simm/repl-mcp {:git/url "https://github.com/is.simm/repl-mcp"
+{:deps {is.simm/repl-mcp {:git/url "https://github.com/simm-is/repl-mcp"
                           :git/sha "latest-sha"}}
  :aliases
  {:repl-mcp {:main-opts ["-m" "is.simm.repl-mcp"]
