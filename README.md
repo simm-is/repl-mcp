@@ -1,4 +1,4 @@
-# is.simm/repl-mcp
+# repl-mcp
 
 **This is alpha software and feedback is wanted! The project is similar in spirit to [clojure-mcp](https://github.com/bhauman/clojure-mcp), but *liberally licensed* and aiming for minimal friction with the REPL from the perspective of agentic coding assistant tools like Claude code.**
 
@@ -109,7 +109,7 @@ Tools are immediately available via MCP with client notifications. For permanent
 ## Testing
 
 ```bash
-clojure -M:test
+clojure -X:test
 ```
 
 ## Library Usage
