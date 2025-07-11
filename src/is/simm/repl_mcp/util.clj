@@ -103,6 +103,6 @@
                                    (McpSchema$TextContent. (.getMessage e))))))))
         
         ;; Create the MCP Prompt schema
-        mcp-prompt-obj (McpSchema$Prompt. prompt-name prompt-desc prompt-args)]
+        mcp-prompt-obj (McpSchema$Prompt. (name prompt-name) prompt-desc (java.util.ArrayList.))]
     
     (McpServerFeatures$SyncPromptSpecification. mcp-prompt-obj prompt-handler)))

@@ -202,7 +202,7 @@
       (let [zloc (:zipper session)
             new-zloc (z/replace zloc new-expr)]
         (update-session! session-id #(assoc % :zipper new-zloc))
-        {:status :success :replaced-with new-expr :info (get-zipper-info session-id)})
+        {:status :success :info (get-zipper-info session-id)})
       (catch Exception e
         {:error (.getMessage e) :status :error}))
     {:error "Session not found" :status :error}))
@@ -228,7 +228,7 @@
       (let [zloc (:zipper session)
             new-zloc (z/insert-left zloc expr)]
         (update-session! session-id #(assoc % :zipper new-zloc))
-        {:status :success :inserted expr :info (get-zipper-info session-id)})
+        {:status :success :info (get-zipper-info session-id)})
       (catch Exception e
         {:error (.getMessage e) :status :error}))
     {:error "Session not found" :status :error}))
@@ -241,7 +241,7 @@
       (let [zloc (:zipper session)
             new-zloc (z/insert-right zloc expr)]
         (update-session! session-id #(assoc % :zipper new-zloc))
-        {:status :success :inserted expr :info (get-zipper-info session-id)})
+        {:status :success :info (get-zipper-info session-id)})
       (catch Exception e
         {:error (.getMessage e) :status :error}))
     {:error "Session not found" :status :error}))

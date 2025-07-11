@@ -2,7 +2,9 @@
   (:require [is.simm.repl-mcp.server :as server]
             [is.simm.repl-mcp.api :as api]
             [is.simm.repl-mcp.logging :as logging]
-            [taoensso.telemere :as log])
+            [taoensso.telemere :as log]
+            [clojure.java.io :as io]
+            [clojure.string :as str])
   (:gen-class))
 
 ;; Setup file-only logging immediately to avoid stdout contamination
@@ -16,6 +18,33 @@
 (require '[is.simm.repl-mcp.tools.cider-nrepl])
 (require '[is.simm.repl-mcp.tools.function-refactor])
 (require '[is.simm.repl-mcp.tools.test-generation])
+
+(defn load-prompts-from-resources!
+  "Load workflow prompts from resources/prompts/workflow directory"
+  []
+  (let [prompts-dir "prompts/workflow/"
+        prompts-resource (io/resource prompts-dir)]
+    (when prompts-resource
+      (let [prompt-files (-> prompts-resource
+                            io/file
+                            .listFiles
+                            seq)]
+        (when prompt-files
+          (doseq [file prompt-files
+                  :when (str/ends-with? (.getName file) ".mustache")]
+            (let [prompt-name (-> (.getName file)
+                                 (str/replace #"\.mustache$" "")
+                                 (str/replace #"-" "_")
+                                 keyword)
+                  template (slurp file)]
+              (api/register-prompt! prompt-name
+                                   (str "Workflow prompt: " (.getName file))
+                                   {}
+                                   template)
+              (log/log! {:level :info :msg "Loaded workflow prompt" :data {:prompt-name prompt-name :file (.getName file)}}))))))))
+
+;; Load workflow prompts after tools are loaded
+(load-prompts-from-resources!)
 
 (defn start-server!
   "Start the MCP server with transport configuration"
@@ -226,6 +255,7 @@
         ;; All status/debug info goes to log file instead
         (log/log! {:level :info :msg "MCP server started successfully"})
         (log/log! {:level :info :msg "Available tools" :data {:tools (keys (list-tools))}})
+        (log/log! {:level :info :msg "Available prompts" :data {:prompts (keys (list-prompts))}})
         (log/log! {:level :info :msg "Server ready for connections" :data {:transports transports}})
         
         ;; Keep the main thread alive
