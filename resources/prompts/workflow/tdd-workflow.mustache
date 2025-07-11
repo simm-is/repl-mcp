@@ -1,62 +1,94 @@
 # Test-Driven Development Workflow
 
-You are helping with a Test-Driven Development (TDD) workflow for Clojure. This prompt guides you through the Red-Green-Refactor cycle.
+This prompt guides you through the Red-Green-Refactor cycle for Clojure development. Follow each step sequentially.
 
 ## Function Information
 - **Function Name**: {{function-name}}
 - **Namespace**: {{namespace}}
 - **Description**: {{description}}
 
-## TDD Workflow Steps
+---
 
-### 1. 🔴 RED Phase - Write Failing Tests
-First, create tests that define the expected behavior:
+## Step 1: 🔴 RED Phase - Write Failing Tests
 
-1. **Generate Test Skeleton**:
-   Use the `create-test-skeleton` tool to generate comprehensive test cases:
-   ```
-   Tool: create-test-skeleton
-   - function-name: {{function-name}}
-   - namespace-name: {{namespace}}
-   ```
+**Current Goal**: Create tests that define expected behavior (tests should fail initially)
 
-2. **Define Specific Test Cases**:
-   Consider these testing scenarios:
-   - **Happy path**: Normal inputs and expected outputs
-   - **Edge cases**: Boundary conditions, empty inputs, nil values
-   - **Error cases**: Invalid inputs, exceptions
-   - **Integration**: How the function works with other functions
+### Action 1.1: Generate Test Structure (Optional)
+```
+Tool: create-test-skeleton
+- function-name: {{function-name}}
+- namespace-name: {{namespace}}
+```
 
-3. **Run Tests** (should fail initially):
-   ```
-   Tool: test-var-query
-   - var-query: {{namespace}}-test/{{function-name}}-test
-   ```
+### Action 1.2: Write Specific Test Cases
+Create a test file with tests covering:
+- **Happy path**: Normal inputs → expected outputs
+- **Edge cases**: Empty/nil inputs, boundary conditions  
+- **Error cases**: Invalid inputs, expected exceptions
+- **Integration**: How function works with other functions
 
-### 2. 🟢 GREEN Phase - Make Tests Pass
-Write the minimal code to make tests pass:
+**Example test structure:**
+```clojure
+(ns {{namespace}}-test
+  (:require [clojure.test :refer [deftest is testing]]
+            [{{namespace}} :as sut]))
 
-1. **Implement Function**:
-   Use the `eval` tool to experiment with implementation:
-   ```
-   Tool: eval
-   - code: (defn {{function-name}} [args] 
-             ;; Minimal implementation
-             )
-   ```
+(deftest {{function-name}}-test
+  (testing "happy path"
+    (is (= expected-result (sut/{{function-name}} valid-input))))
+  
+  (testing "edge cases" 
+    (is (= edge-result (sut/{{function-name}} edge-input))))
+    
+  (testing "error cases"
+    (is (thrown? Exception (sut/{{function-name}} invalid-input)))))
+```
 
-2. **Verify Implementation**:
-   Test individual expressions and logic:
-   ```
-   Tool: eval
-   - code: ({{function-name}} test-input)
-   ```
+### Action 1.3: Run Tests (Should Fail)
+```
+Tool: test-var-query
+- var-query: {{namespace}}-test/{{function-name}}-test
+```
 
-3. **Run Tests Again**:
-   ```
-   Tool: test-var-query
-   - var-query: {{namespace}}-test/{{function-name}}-test
-   ```
+**Expected Result**: Tests should fail because function doesn't exist yet. ✅ This is correct for RED phase!
+
+---
+
+## Step 2: 🟢 GREEN Phase - Make Tests Pass
+
+**Current Goal**: Write minimal code to make all tests pass
+
+### Action 2.1: Create Minimal Implementation
+```
+Tool: eval
+- code: (defn {{function-name}} [& args]
+          ;; Start with the simplest implementation that could work
+          nil)
+```
+
+### Action 2.2: Iterate Until Tests Pass
+- **Start simple**: Hardcode return values if needed
+- **Add logic gradually**: Handle one test case at a time
+- **Test frequently**: Use `eval` to test individual expressions
+
+**Example iterations:**
+```
+Tool: eval  
+- code: ({{namespace}}/{{function-name}} test-input)
+```
+
+**Progressive implementation strategy:**
+1. Hardcode return for first test
+2. Add conditional logic for second test  
+3. Generalize implementation for all tests
+
+### Action 2.3: Verify All Tests Pass
+```
+Tool: test-var-query
+- var-query: {{namespace}}-test/{{function-name}}-test
+```
+
+**Expected Result**: All tests should pass. ✅ GREEN phase complete!
 
 ### 3. 🔵 REFACTOR Phase - Improve Code Quality
 Once tests pass, improve the code:

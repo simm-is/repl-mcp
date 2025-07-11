@@ -6,7 +6,7 @@
             [clojure.data.json :as json])
   (:import [io.modelcontextprotocol.server McpServerFeatures$SyncToolSpecification McpServerFeatures$SyncPromptSpecification]
            [io.modelcontextprotocol.spec McpSchema$TextContent McpSchema$Tool McpSchema$CallToolResult 
-                                         McpSchema$Prompt McpSchema$GetPromptResult]
+                                         McpSchema$Prompt McpSchema$GetPromptResult McpSchema$PromptArgument]
            [java.util.function BiFunction]))
 
 ;; =============================================================================
@@ -102,7 +102,14 @@
                                  (java.util.List/of 
                                    (McpSchema$TextContent. (.getMessage e))))))))
         
-        ;; Create the MCP Prompt schema
-        mcp-prompt-obj (McpSchema$Prompt. (name prompt-name) prompt-desc (java.util.ArrayList.))]
+        ;; Create the MCP Prompt schema with arguments
+        prompt-args-list (java.util.ArrayList.)
+        _ (doseq [[arg-name arg-spec] prompt-args]
+            (let [arg-obj (McpSchema$PromptArgument. 
+                            (name arg-name)
+                            (get arg-spec "description" "")
+                            (get arg-spec "required" false))]
+              (.add prompt-args-list arg-obj)))
+        mcp-prompt-obj (McpSchema$Prompt. (name prompt-name) prompt-desc prompt-args-list)]
     
     (McpServerFeatures$SyncPromptSpecification. mcp-prompt-obj prompt-handler)))

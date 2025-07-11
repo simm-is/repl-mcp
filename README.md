@@ -35,6 +35,8 @@ Add repl-mcp to your `deps.edn` dependencies and include the `:repl-mcp` alias (
                           jakarta.servlet/jakarta.servlet-api {:mvn/version "6.0.0"}}}}}
 ```
 
+Also make sure to provide the `Instructions` section from `CLAUDE.md` to your assistant to be aware of and prioritize the tools and prompts.
+
 ### Start the MCP Server
 
 ```bash

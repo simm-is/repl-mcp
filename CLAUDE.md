@@ -8,9 +8,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. In particular use the `eval` MCP call to draft and test code before adding it to the project. Grow the code until you are confident it is behaving as intended.
 3. If you need to add new code you can use your normal `Edit` tool to add code, and then use the `load-file` to load the changed file and optionally use namespace to reset namespaces if needed.
 4. If you need to refactor code prefer to use the structural editing tools to avoid breaking parentheses and existing bindings.
-5. Then draft a test case to cover important invariants of the code you have established and add it with the `tdd-workflow` prompt template.
-6. If you need to debug an existing function follow the `debug-function` prompt.
+5. For bigger chunks of functionality draft a test case to cover important invariants of the code you have established. For new functionality you can add it with the `tdd-workflow` prompt template.
+6. For debugging, use your expertise first - if the issue is obvious, fix it directly. Use the `debug-function` prompt for complex/unfamiliar issues or when systematic investigation is needed.
 7. If structural editing tools malfunction, fall back to regular Edit tool and reload with `load-file`.
+
+### Workflow Philosophy
+
+**Balance efficiency with thoroughness**: Use your expertise and pattern recognition first, then fall back to structured workflows when needed.
+
+**When to use direct approaches:**
+- Obvious bugs (wrong operators, typos, clear logic errors)
+- Familiar code patterns and domains
+- Time-critical situations
+- Simple, isolated functions
+
+**When to use structured workflows (prompts):**
+- Complex, unfamiliar codebases
+- When stuck or unsure of approach
+- Learning/teaching scenarios
+- Critical systems requiring audit trails
+- Team environments needing consistent practices
 
 ### Tool Selection Guide
 
@@ -18,7 +35,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Simple file edits**: Use `Edit` tool for straightforward additions
 - **Complex refactoring**: Use `structural-*` tools for sophisticated code transformations
 - **File reloading**: Use `load-file` after making changes
-- **Debugging**: Use `debug-function` prompt template
+- **Debugging**: 
+  - **Quick fixes**: Use direct approach for obvious issues (wrong operators, typos, clear logic errors)
+  - **Systematic investigation**: Use `debug-function` prompt for complex bugs, unfamiliar code, or when stuck
+  - **Learning/teaching**: Use structured workflows to demonstrate debugging techniques
 
 ## Commands
 

@@ -19,6 +19,27 @@
 (require '[is.simm.repl-mcp.tools.function-refactor])
 (require '[is.simm.repl-mcp.tools.test-generation])
 
+(defn get-prompt-args
+  "Get argument definitions for specific prompts"
+  [prompt-name]
+  (case prompt-name
+    :tdd_workflow {"function-name" {"description" "Name of the function to implement" "required" true}
+                   "namespace" {"description" "Namespace for the function" "required" true}
+                   "description" {"description" "Description of what the function should do" "required" true}}
+    :debug_function {"function-name" {"description" "Name of the function to debug" "required" true}
+                     "namespace" {"description" "Namespace containing the function" "required" true}
+                     "issue" {"description" "Description of the issue" "required" true}
+                     "expected" {"description" "Expected behavior" "required" true}
+                     "actual" {"description" "Actual behavior" "required" true}
+                     "file-path" {"description" "Path to the file containing the function" "required" false}
+                     "project-root" {"description" "Root directory of the project" "required" false}}
+    :refactor_extract_function {"source-function" {"description" "Name of the source function" "required" true}
+                                "namespace" {"description" "Namespace containing the function" "required" true}
+                                "new-function-name" {"description" "Name for the new extracted function" "required" true}
+                                "code-to-extract" {"description" "Code snippet to extract" "required" true}
+                                "file-path" {"description" "Path to the source file" "required" true}}
+    {}))
+
 (defn load-prompts-from-resources!
   "Load workflow prompts from resources/prompts/workflow directory"
   []
@@ -36,12 +57,13 @@
                                  (str/replace #"\.mustache$" "")
                                  (str/replace #"-" "_")
                                  keyword)
-                  template (slurp file)]
+                  template (slurp file)
+                  prompt-args (get-prompt-args prompt-name)]
               (api/register-prompt! prompt-name
                                    (str "Workflow prompt: " (.getName file))
-                                   {}
+                                   prompt-args
                                    template)
-              (log/log! {:level :info :msg "Loaded workflow prompt" :data {:prompt-name prompt-name :file (.getName file)}}))))))))
+              (log/log! {:level :info :msg "Loaded workflow prompt" :data {:prompt-name prompt-name :file (.getName file) :args (keys prompt-args)}}))))))))
 
 ;; Load workflow prompts after tools are loaded
 (load-prompts-from-resources!)
