@@ -5,10 +5,11 @@
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for Clojure development that provides built-in tools for interactive coding assistance and structural editing via nREPL integration. You can use it during development, e.g. in Claude code, by just adding it to your project. Optionally you can also use the same functionality to export your own functions through the MCP interface and also run your own dedicated MCP server with a network transport (SSE) for production. The overall philosophy is to minimize friction and speed up the feedback loop with the Clojure REPL during development. MCP supports dynamic exports of tools and prompts, so you can even create your own tools/workflows and use them in your coding assistant without restarts (this [does not work with Claude code as a MCP client yet](https://github.com/anthropics/claude-code/issues/2722).)
 
 **Key Features:**
-- **41 Built-in Tools**: Evaluation, refactoring, cider-nrepl, structural editing, and test generation
+- **44 Built-in Tools**: Evaluation, refactoring, cider-nrepl, structural editing, test generation, and static analysis
 - **Dynamic Tool Registration**: Add new tools while the server is running
 - **Transport Abstraction**: STDIO and HTTP+SSE transport support
 - **nREPL Integration**: Full cider-nrepl and refactor-nrepl middleware support
+- **Code Quality**: Integrated clj-kondo linting for real-time feedback
 
 Create project-specific tools interactively for reliable, predictable workflows. Configure your coding assistant to prefer these tools via [CLAUDE.md](./CLAUDE.md) in your project.
 
@@ -28,6 +29,7 @@ Add repl-mcp to your `deps.edn` dependencies and include the `:repl-mcp` alias (
                           rewrite-clj/rewrite-clj {:mvn/version "1.1.47"}
                           refactor-nrepl/refactor-nrepl {:mvn/version "3.10.0"}
                           dev.weavejester/cljfmt {:mvn/version "0.13.1"}
+                          clj-kondo/clj-kondo {:mvn/version "2025.06.05"}
                           org.slf4j/slf4j-api {:mvn/version "2.0.17"}
                           org.slf4j/slf4j-nop {:mvn/version "2.0.17"}
                           org.eclipse.jetty.ee10/jetty-ee10-servlet {:mvn/version "12.0.5"}
@@ -80,14 +82,34 @@ clojure -M:repl-mcp 19888
 (repl-mcp/stop-server!)   ; Stop server
 ```
 
-## Available Tools (41 Total)
+## Available Tools (44 Total)
 
 **Evaluation (2)**: `:eval`, `:load-file`  
 **Refactoring (11)**: `:clean-ns`, `:find-symbol`, `:rename-file-or-dir`, `:resolve-missing`, `:find-used-locals`, `:extract-function`, `:extract-variable`, `:add-function-parameter`, `:organize-imports`, `:inline-function`, `:rename-local-variable`  
 **Cider-nREPL (12)**: `:format-code`, `:macroexpand`, `:eldoc`, `:complete`, `:apropos`, `:test-all`, `:enhanced-info`, `:ns-list`, `:ns-vars`, `:classpath`, `:refresh`, `:test-var-query`  
 **Structural Editing (10)**: `:structural-create-session`, `:structural-save-session`, `:structural-close-session`, `:structural-get-info`, `:structural-list-sessions`, `:structural-find-symbol-enhanced`, `:structural-replace-node`, `:structural-bulk-find-and-replace`, `:structural-extract-to-let`, `:structural-thread-first`  
 **Function Refactoring (5)**: `:find-function-definition`, `:rename-function-in-file`, `:find-function-usages-in-project`, `:rename-function-across-project`, `:replace-function-definition`  
-**Test Generation (1)**: `:create-test-skeleton`
+**Test Generation (1)**: `:create-test-skeleton`  
+**Static Analysis (3)**: `:lint-code`, `:lint-project`, `:setup-clj-kondo`
+
+### Code Quality Tools
+
+The integrated clj-kondo static analysis provides:
+
+- **`:lint-code`**: Lint code strings during interactive development
+  - Detects unused bindings, imports, and variables
+  - Syntax error validation with clear error messages
+  - Custom configuration support per invocation
+  
+- **`:lint-project`**: Analyze entire directories or projects
+  - Project-wide linting with parallel processing
+  - Respects existing `.clj-kondo/config.edn` configurations
+  - Comprehensive codebase quality assessment
+  
+- **`:setup-clj-kondo`**: Initialize or update project linting configuration
+  - Import library-specific linting rules from dependencies
+  - Update project cache for improved performance
+  - Safe configuration management (additive only)
 
 ## Development
 
