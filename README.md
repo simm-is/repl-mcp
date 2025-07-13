@@ -128,10 +128,10 @@ Use repl-mcp as a library to build custom MCP servers:
   (fn [tool-call context]
     {:result "Custom tool result" :status :success}))
 
-;; Create and start server (require Jetty)
+;; Create and start server (requires Jetty)
 (defn start-custom-server! []
   (let [transport-configs {:http-sse (transport/create-transport-config :http-sse)}
-        ;; this collects all registered tools and prompts
+        ;; This collects all registered tools and prompts
         context (transport/create-context)]
     (transport/start-mcp-server! transport-configs context)))
 ```

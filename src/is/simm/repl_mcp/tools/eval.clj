@@ -2,9 +2,17 @@
   (:require [is.simm.repl-mcp.interactive :refer [register-tool!]]
             [is.simm.repl-mcp.logging :as logging]
             [nrepl.core :as nrepl]
-            [taoensso.telemere :as log]))
+            [taoensso.telemere :as log]
+            [clojure.pprint :as pprint]))
 
 ;; Pure implementation functions for testing
+
+(defn pretty-print-value
+  "Pretty print a value to a string, handling nil and various data types gracefully."
+  [value]
+  (if (nil? value)
+    "nil"
+    (with-out-str (pprint/pprint value))))
 
 (defn eval-code
   "Evaluate Clojure code using nREPL client. Returns result map with :value, :output, :error, :status."
@@ -33,7 +41,7 @@
                    (:err combined) {:error (:err combined)
                                    :output (:out combined)
                                    :status :error}
-                   :else {:value (first values)
+                   :else {:value (pretty-print-value (first values))
                          :output (:out combined)
                          :status :success})]
       (log/log! {:level :info :msg "Eval completed" :data {:code code :result result}})
