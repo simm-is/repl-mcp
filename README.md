@@ -5,11 +5,12 @@
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for Clojure development that provides built-in tools for interactive coding assistance and structural editing via nREPL integration. You can use it during development, e.g. in Claude code, by just adding it to your project. Optionally you can also use the same functionality to export your own functions through the MCP interface and also run your own dedicated MCP server with a network transport (SSE) for production. The overall philosophy is to minimize friction and speed up the feedback loop with the Clojure REPL during development. MCP supports dynamic exports of tools and prompts, so you can even create your own tools/workflows and use them in your coding assistant without restarts (this [does not work with Claude code as a MCP client yet](https://github.com/anthropics/claude-code/issues/2722).)
 
 **Key Features:**
-- **44 Built-in Tools**: Evaluation, refactoring, cider-nrepl, structural editing, test generation, and static analysis
+- **47 Built-in Tools**: Evaluation, refactoring, cider-nrepl, structural editing, test generation, static analysis, and dependency management
 - **Dynamic Tool Registration**: Add new tools while the server is running
 - **Transport Abstraction**: STDIO and HTTP+SSE transport support
 - **nREPL Integration**: Full cider-nrepl and refactor-nrepl middleware support
 - **Code Quality**: Integrated clj-kondo linting for real-time feedback
+- **Runtime Dependencies**: Hot-load dependencies without REPL restart (Clojure 1.12+)
 
 Create project-specific tools interactively for reliable, predictable workflows. Configure your coding assistant to prefer these tools via [CLAUDE.md](./CLAUDE.md) in your project.
 
@@ -82,7 +83,7 @@ clojure -M:repl-mcp 19888
 (repl-mcp/stop-server!)   ; Stop server
 ```
 
-## Available Tools (44 Total)
+## Available Tools (47 Total)
 
 **Evaluation (2)**: `:eval`, `:load-file`  
 **Refactoring (11)**: `:clean-ns`, `:find-symbol`, `:rename-file-or-dir`, `:resolve-missing`, `:find-used-locals`, `:extract-function`, `:extract-variable`, `:add-function-parameter`, `:organize-imports`, `:inline-function`, `:rename-local-variable`  
@@ -90,7 +91,8 @@ clojure -M:repl-mcp 19888
 **Structural Editing (10)**: `:structural-create-session`, `:structural-save-session`, `:structural-close-session`, `:structural-get-info`, `:structural-list-sessions`, `:structural-find-symbol-enhanced`, `:structural-replace-node`, `:structural-bulk-find-and-replace`, `:structural-extract-to-let`, `:structural-thread-first`  
 **Function Refactoring (5)**: `:find-function-definition`, `:rename-function-in-file`, `:find-function-usages-in-project`, `:rename-function-across-project`, `:replace-function-definition`  
 **Test Generation (1)**: `:create-test-skeleton`  
-**Static Analysis (3)**: `:lint-code`, `:lint-project`, `:setup-clj-kondo`
+**Static Analysis (3)**: `:lint-code`, `:lint-project`, `:setup-clj-kondo`  
+**Dependency Management (3)**: `:add-libs`, `:sync-deps`, `:check-namespace`
 
 ### Code Quality Tools
 
@@ -110,6 +112,30 @@ The integrated clj-kondo static analysis provides:
   - Import library-specific linting rules from dependencies
   - Update project cache for improved performance
   - Safe configuration management (additive only)
+
+### Dependency Management Tools
+
+**Runtime dependency management using Clojure 1.12+ add-libs functionality:**
+
+- **`:add-libs`**: Add new libraries to the running REPL classpath
+  - Supports Maven coordinates as EDN maps or strings
+  - Libraries are immediately available without REPL restart
+  - Useful for trying new libraries during interactive development
+  
+- **`:sync-deps`**: Synchronize dependencies from deps.edn
+  - Loads dependencies defined in deps.edn that aren't yet on classpath
+  - Automatically resolves and adds missing project dependencies
+  - Perfect for syncing after updating deps.edn
+  
+- **`:check-namespace`**: Verify namespace/library availability
+  - Check if a specific namespace is available on the classpath
+  - Useful for confirming library loading before attempting to use it
+  - Returns availability status and error details if not found
+
+**Requirements:**
+- Clojure 1.12+ (for add-libs functionality)
+- REPL context (only works within active nREPL session)
+- Maven-compatible dependencies (mvn/version coordinates)
 
 ## Development
 

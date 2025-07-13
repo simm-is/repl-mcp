@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Instructions
 
-1. Use the interactive Clojure development tools provided through MCP in preference to your default text editing tools and system calls. `setup-clj-kondo` to optionally get linting support.
+1. Use the interactive Clojure development tools provided through MCP in preference to your default text editing tools and system calls. `setup-clj-kondo` to optionally get linting support. To add dependencies on the fly you can use `add-libs` and `sync-libs`.
 2. In particular use the `eval` MCP call to draft and test code before adding it to the project. Grow the code until you are confident it is behaving as intended. Use `lint-code` if available to spot problems early.
 3. If you need to add new code you can use your normal `Edit` tool to add code, and then use the `load-file` to load the changed file and optionally use namespace to reset namespaces if needed. Use `lint-project` if available to check the new code is conform.
 4. If you need to refactor code prefer to use the structural editing tools to avoid breaking parentheses and existing bindings.
@@ -36,6 +36,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Complex refactoring**: Use `structural-*` tools for sophisticated code transformations
 - **File reloading**: Use `load-file` after making changes
 - **Code quality/linting**: Use `lint-code` for real-time feedback, `lint-project` for codebase analysis
+- **Dependency management**: Use `add-libs` for runtime dependencies, `sync-deps` for project sync, `check-namespace` for availability
 - **Debugging**: 
   - **Quick fixes**: Use direct approach for obvious issues (wrong operators, typos, clear logic errors)
   - **Systematic investigation**: Use `debug-function` prompt for complex bugs, unfamiliar code, or when stuck
@@ -67,6 +68,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Unused bindings, imports, and variables are flagged as warnings
 - Namespace mismatches and structural issues are detected
 - Custom severity levels can be configured per linter rule
+
+### Dependency Management Workflow
+
+**Runtime Dependency Addition**: The server includes Clojure 1.12+ integration for hot-loading dependencies without REPL restart.
+
+**Available Tools:**
+- **`add-libs`**: Add new libraries to the running REPL classpath
+- **`sync-deps`**: Synchronize dependencies from deps.edn that aren't yet loaded
+- **`check-namespace`**: Verify if a namespace/library is available on the classpath
+
+**Workflow Integration Patterns:**
+
+1. **Interactive Development**: Use `add-libs` to try new libraries during development
+2. **Project Synchronization**: Use `sync-deps` after updating deps.edn to load new dependencies
+3. **Dependency Verification**: Use `check-namespace` to confirm library availability before use
+4. **Hot Development**: Add dependencies without losing REPL state or stopping development
+
+**Usage Requirements:**
+- Requires Clojure 1.12+ for add-libs functionality
+- Only works in REPL context (requires `*repl*` to be true)
+- Dependencies must be available in Maven repositories
+- Project must be using tools.deps (deps.edn) for dependency management
 
 ## Commands
 
@@ -101,7 +124,7 @@ clojure -M:repl-mcp --list-prompts
 
 ## Architecture
 
-This is a **Model Context Protocol (MCP) server** for Clojure development with 44 built-in tools. The architecture is built around a unified server design with transport abstraction.
+This is a **Model Context Protocol (MCP) server** for Clojure development with 47 built-in tools. The architecture is built around a unified server design with transport abstraction.
 
 ### Core Components
 
@@ -112,7 +135,7 @@ This is a **Model Context Protocol (MCP) server** for Clojure development with 4
 
 **Tool System**: Dynamic tool registration with runtime addition/removal
 - `dispatch.clj`: Multimethod-based tool routing with registries
-- `tools/`: 44 tools across 7 categories (evaluation, refactoring, cider-nrepl, structural editing, function refactoring, test generation, static analysis)
+- `tools/`: 47 tools across 8 categories (evaluation, refactoring, cider-nrepl, structural editing, function refactoring, test generation, static analysis, dependency management)
 - `interactive.clj`: Runtime tool definition using `register-tool!` function
 
 **Server Core**: Unified server managing both transports simultaneously
@@ -127,7 +150,7 @@ This is a **Model Context Protocol (MCP) server** for Clojure development with 4
 3. **MCP Requests**: Transport -> `dispatch/handle-tool-call` multimethod -> tool handler -> response
 4. **Dynamic Tools**: `interactive/register-tool!` -> `defmethod` -> `dispatch/register-tool!` -> client notifications
 
-### Tool Categories (44 total)
+### Tool Categories (47 total)
 
 **Evaluation (2)**: Direct nREPL integration for code evaluation and file loading
 **Refactoring (11)**: Namespace cleaning, symbol finding, code extraction, import organization
@@ -136,6 +159,7 @@ This is a **Model Context Protocol (MCP) server** for Clojure development with 4
 **Function Refactoring (5)**: Project-wide function operations (rename, find usages, replace)
 **Test Generation (1)**: Comprehensive test skeleton generation
 **Static Analysis (3)**: clj-kondo integration for linting, code quality, and style enforcement
+**Dependency Management (3)**: Runtime dependency addition, project synchronization, namespace availability checks
 
 ### nREPL Integration
 
@@ -171,11 +195,12 @@ The transport system uses protocols (`McpTransport`) for pluggable implementatio
 
 - Unit tests for individual tools in `test/is/simm/repl_mcp/tools/`
 - Integration tests in `test/is/simm/repl_mcp/`
-- All tests run with `clojure -X:test` (43 tests, 328 assertions)
+- All tests run with `clojure -X:test` (56 tests, 414 assertions)
 - Test fixtures in `test_fixtures.clj` for common test patterns
+- nREPL integration testing for dependency management and evaluation tools
 
 ### Project Integration
 
-This project is designed to be added to other Clojure projects via the `:repl-mcp` alias in `deps.edn`. When users add it to their projects, they get access to all 41 tools for their specific codebase through the nREPL connection.
+This project is designed to be added to other Clojure projects via the `:repl-mcp` alias in `deps.edn`. When users add it to their projects, they get access to all 47 tools for their specific codebase through the nREPL connection.
 
 The MCP server connects to the project's nREPL server to provide tools that operate on the actual project code, making it context-aware for the specific codebase being worked on.
