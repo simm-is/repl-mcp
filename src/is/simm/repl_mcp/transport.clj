@@ -39,27 +39,13 @@
 ;; Transport Context
 ;; =============================================================================
 
-(defn create-nrepl-config
-  "Create nREPL configuration"
-  [& {:keys [port host middleware bind-address]
-      :or {port 7888
-           host "localhost"
-           middleware []
-           bind-address "127.0.0.1"}}]
-  {:port port
-   :host host
-   :middleware middleware
-   :bind-address bind-address})
-
 (defn create-server-context
-  "Create server context with tools, prompts, and configuration"
-  [& {:keys [tools prompts nrepl]
+  "Create server context with tools and prompts"
+  [& {:keys [tools prompts]
       :or {tools {}
-           prompts {}
-           nrepl (create-nrepl-config)}}]
+           prompts {}}}]
   {:tools tools
    :prompts prompts
-   :nrepl nrepl
    :created-at (java.time.Instant/now)})
 
 ;; =============================================================================
@@ -136,14 +122,14 @@
       (reset! context nil))
     this)
   
-  (info [this]
+  (info [_this]
     {:running? @running?
      :context @context
      :transports (into {} (map (fn [[type transport]]
                                 [type (info transport)])
                               transports))})
   
-  (supports-feature? [this feature]
+  (supports-feature? [_this feature]
     ;; Return true if any transport supports the feature
     (some #(supports-feature? (second %) feature) transports)))
 
@@ -168,24 +154,7 @@
 
 (defn create-context
   "Create context with all registered tools and prompts"
-  [nrepl-config]
+  []
   (create-server-context 
     :tools (dispatch/get-registered-tools)
-    :prompts (dispatch/get-registered-prompts)
-    :nrepl nrepl-config))
-
-;; =============================================================================
-;; Transport Feature Constants
-;; =============================================================================
-
-(def transport-features
-  "Set of supported transport features"
-  #{:streaming           ; Server-sent events / streaming responses
-    :multiple-clients    ; Multiple concurrent client connections
-    :sessions           ; Session management
-    :reconnection       ; Automatic reconnection support
-    :authentication     ; Built-in authentication
-    :remote-access      ; Network accessible (not just local)
-    :stateless         ; Stateless operation (no server state)
-    :bidirectional     ; Full bidirectional communication
-    })
+    :prompts (dispatch/get-registered-prompts)))

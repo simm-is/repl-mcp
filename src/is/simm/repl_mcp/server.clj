@@ -1,7 +1,6 @@
 (ns is.simm.repl-mcp.server
   "Simplified MCP server using transport abstraction"
   (:require [is.simm.repl-mcp.transport :as transport]
-            [is.simm.repl-mcp.dispatch :as dispatch]
             [nrepl.core :as nrepl]
             [nrepl.server :as nrepl-server]
             [taoensso.telemere :as log]
@@ -73,12 +72,12 @@
                                                                                   :port http-port
                                                                                   :host "localhost")))
           
-          ;; Create context with tools, prompts, and nREPL client
-          context (transport/create-context 
-                    (transport/create-nrepl-config :port nrepl-port))
+          ;; Create context with tools and prompts
+          context (transport/create-context)
           
           ;; Add nREPL client to context for tools that need it
-          enhanced-context (assoc context :nrepl-client nrepl-client)
+          enhanced-context (assoc context :nrepl-client nrepl-client
+                                         :nrepl-port nrepl-port)
           
           ;; Start multi-transport server
           multi-server (transport/start-mcp-server! transport-configs enhanced-context)]
@@ -149,7 +148,7 @@
   (get-server-info))
 
 ;; =============================================================================
-;; Dynamic Tool Management (simplified)
+;; Dynamic Tool Management
 ;; =============================================================================
 
 (defn add-tool-to-running-server!
