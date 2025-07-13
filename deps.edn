@@ -13,6 +13,7 @@
                           rewrite-clj/rewrite-clj {:mvn/version "1.1.47"}
                           refactor-nrepl/refactor-nrepl {:mvn/version "3.10.0"}
                           dev.weavejester/cljfmt {:mvn/version "0.13.1"}
+                          clj-kondo/clj-kondo {:mvn/version "2025.06.05"}
 
                           org.slf4j/slf4j-api {:mvn/version "2.0.17"}
                           org.slf4j/slf4j-nop {:mvn/version "2.0.17"}  ; No-operation SLF4J provider to suppress warnings
@@ -32,6 +33,7 @@
                       rewrite-clj/rewrite-clj {:mvn/version "1.1.47"}
                       refactor-nrepl/refactor-nrepl {:mvn/version "3.10.0"}
                       dev.weavejester/cljfmt {:mvn/version "0.13.1"}
+                      clj-kondo/clj-kondo {:mvn/version "2025.06.05"}
 
                       org.slf4j/slf4j-api {:mvn/version "2.0.17"}
                       org.slf4j/slf4j-nop {:mvn/version "2.0.17"}  ; No-operation SLF4J provider to suppress warnings

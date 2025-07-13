@@ -18,6 +18,7 @@
 (require '[is.simm.repl-mcp.tools.cider-nrepl])
 (require '[is.simm.repl-mcp.tools.function-refactor])
 (require '[is.simm.repl-mcp.tools.test-generation])
+(require '[is.simm.repl-mcp.tools.clj-kondo])
 
 (defn get-prompt-args
   "Get argument definitions for specific prompts"

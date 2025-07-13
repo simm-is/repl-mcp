@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Instructions
 
-1. Use the interactive Clojure development tools provided through MCP in preference to your default text editing tools and system calls.
-2. In particular use the `eval` MCP call to draft and test code before adding it to the project. Grow the code until you are confident it is behaving as intended.
-3. If you need to add new code you can use your normal `Edit` tool to add code, and then use the `load-file` to load the changed file and optionally use namespace to reset namespaces if needed.
+1. Use the interactive Clojure development tools provided through MCP in preference to your default text editing tools and system calls. `setup-clj-kondo` to optionally get linting support.
+2. In particular use the `eval` MCP call to draft and test code before adding it to the project. Grow the code until you are confident it is behaving as intended. Use `lint-code` if available to spot problems early.
+3. If you need to add new code you can use your normal `Edit` tool to add code, and then use the `load-file` to load the changed file and optionally use namespace to reset namespaces if needed. Use `lint-project` if available to check the new code is conform.
 4. If you need to refactor code prefer to use the structural editing tools to avoid breaking parentheses and existing bindings.
 5. For bigger chunks of functionality draft a test case to cover important invariants of the code you have established. For new functionality you can add it with the `tdd-workflow` prompt template.
 6. For debugging, use your expertise first - if the issue is obvious, fix it directly. Use the `debug-function` prompt for complex/unfamiliar issues or when systematic investigation is needed.
@@ -35,10 +35,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Simple file edits**: Use `Edit` tool for straightforward additions
 - **Complex refactoring**: Use `structural-*` tools for sophisticated code transformations
 - **File reloading**: Use `load-file` after making changes
+- **Code quality/linting**: Use `lint-code` for real-time feedback, `lint-project` for codebase analysis
 - **Debugging**: 
   - **Quick fixes**: Use direct approach for obvious issues (wrong operators, typos, clear logic errors)
   - **Systematic investigation**: Use `debug-function` prompt for complex bugs, unfamiliar code, or when stuck
   - **Learning/teaching**: Use structured workflows to demonstrate debugging techniques
+
+### Code Quality Workflow
+
+**Static Analysis Integration**: The server includes comprehensive clj-kondo integration for real-time code quality feedback.
+
+**Available Tools:**
+- **`lint-code`**: Lint code strings during interactive development
+- **`lint-project`**: Analyze entire directories or projects for issues  
+- **`setup-clj-kondo`**: Initialize or update project linting configuration
+
+**Workflow Integration Patterns:**
+
+1. **Interactive Development**: Use `lint-code` after `eval` to catch quality issues early
+2. **Pre-commit Checks**: Run `lint-project` on modified files before committing
+3. **Refactoring Validation**: Use linting after structural editing to ensure code quality
+4. **Project Setup**: Run `setup-clj-kondo` when adding the MCP server to new projects or when dependencies change
+
+**Configuration Management:**
+- Project-specific rules are automatically loaded from `.clj-kondo/config.edn`
+- Custom configurations can be passed per-invocation for specific use cases
+- Use `setup-clj-kondo` with `copy-configs: true` to import library-specific linting rules
+
+**Quality Gates:**
+- Code strings with syntax errors return `isError: true`
+- Unused bindings, imports, and variables are flagged as warnings
+- Namespace mismatches and structural issues are detected
+- Custom severity levels can be configured per linter rule
 
 ## Commands
 
@@ -63,11 +91,17 @@ clojure -M:build ci
 clojure -M:repl-mcp --list-tools
 clojure -M:repl-mcp --tool-help eval
 clojure -M:repl-mcp --list-prompts
+
+# Code quality commands (via MCP tools)
+# Note: These require an active MCP session
+# lint-code: Check code strings for issues
+# lint-project: Analyze project files
+# setup-clj-kondo: Initialize linting configuration
 ```
 
 ## Architecture
 
-This is a **Model Context Protocol (MCP) server** for Clojure development with 41 built-in tools. The architecture is built around a unified server design with transport abstraction.
+This is a **Model Context Protocol (MCP) server** for Clojure development with 44 built-in tools. The architecture is built around a unified server design with transport abstraction.
 
 ### Core Components
 
@@ -78,7 +112,7 @@ This is a **Model Context Protocol (MCP) server** for Clojure development with 4
 
 **Tool System**: Dynamic tool registration with runtime addition/removal
 - `dispatch.clj`: Multimethod-based tool routing with registries
-- `tools/`: 41 tools across 6 categories (evaluation, refactoring, cider-nrepl, structural editing, function refactoring, test generation)
+- `tools/`: 44 tools across 7 categories (evaluation, refactoring, cider-nrepl, structural editing, function refactoring, test generation, static analysis)
 - `interactive.clj`: Runtime tool definition using `register-tool!` function
 
 **Server Core**: Unified server managing both transports simultaneously
@@ -93,7 +127,7 @@ This is a **Model Context Protocol (MCP) server** for Clojure development with 4
 3. **MCP Requests**: Transport -> `dispatch/handle-tool-call` multimethod -> tool handler -> response
 4. **Dynamic Tools**: `interactive/register-tool!` -> `defmethod` -> `dispatch/register-tool!` -> client notifications
 
-### Tool Categories (41 total)
+### Tool Categories (44 total)
 
 **Evaluation (2)**: Direct nREPL integration for code evaluation and file loading
 **Refactoring (11)**: Namespace cleaning, symbol finding, code extraction, import organization
@@ -101,6 +135,7 @@ This is a **Model Context Protocol (MCP) server** for Clojure development with 4
 **Structural Editing (10)**: Session-based code manipulation using rewrite-clj and zippers
 **Function Refactoring (5)**: Project-wide function operations (rename, find usages, replace)
 **Test Generation (1)**: Comprehensive test skeleton generation
+**Static Analysis (3)**: clj-kondo integration for linting, code quality, and style enforcement
 
 ### nREPL Integration
 
