@@ -15,8 +15,8 @@
   (testing "load-clojure-file function exists"
     (is (fn? eval-tools/load-clojure-file)))
   
-  (testing "pretty-print-value function exists"
-    (is (fn? eval-tools/pretty-print-value))))
+  (testing "format-result-for-mcp function exists"
+    (is (fn? eval-tools/format-result-for-mcp))))
 
 (deftest eval-code-error-handling-test
   (testing "eval-code handles various error conditions gracefully"
@@ -111,24 +111,22 @@
       (let [result (eval-tools/eval-code *nrepl-client* "(+ 1 2)")]
         (is (= (:status result) :success))
         (is (str/includes? (:value result) "3"))
-        (is (string? (:value result))) ; Should be pretty-printed as string
-        (is (str/ends-with? (:value result) "\n")))) ; Should end with newline from pretty-printing
+        (is (string? (:value result)))) ; Should end with newline from pretty-printing
     
-    (testing "complex data structure evaluation with pretty-printing"
+    (testing "complex data structure evaluation"
       (let [result (eval-tools/eval-code *nrepl-client* "{:a 1 :b [1 2 3] :c #{:x :y}}")]
         (is (= (:status result) :success))
         (is (str/includes? (:value result) ":a"))
         (is (str/includes? (:value result) ":b"))
         (is (str/includes? (:value result) "[1 2 3]"))
         (is (str/includes? (:value result) "#{"))
-        ;; This simple structure might be on one line, so just check it's properly formatted
-        (is (str/ends-with? (:value result) "\n"))))
+        (is (string? (:value result)))))
     
     (testing "function definition and invocation"
       ;; Define a function
       (let [def-result (eval-tools/eval-code *nrepl-client* "(defn square [x] (* x x))")]
         (is (= (:status def-result) :success))
-        (is (str/includes? (:value def-result) "#'user/square")))
+        (is (str/includes? (:value def-result) "user/square")))
       
       ;; Use the function
       (let [use-result (eval-tools/eval-code *nrepl-client* "(square 5)")]
@@ -157,22 +155,40 @@
         (is (str/includes? (:value result) "42"))
         (is (str/includes? (:output result) "Hello from nREPL!"))))
     
-    (testing "pretty-printing of complex nested structures"
+    (testing "complex nested structures"
       ;; First define the data structure
       (let [def-result (eval-tools/eval-code *nrepl-client* "(def data {:users [{:name \"Alice\" :skills #{:clojure :python}} 
                                             {:name \"Bob\" :skills #{:java :sql}}] 
                                    :meta {:version 1.0}})")]
         (is (= (:status def-result) :success)))
       
-      ;; Then evaluate it to get the pretty-printed result
+      ;; Then evaluate it to get the result
       (let [result (eval-tools/eval-code *nrepl-client* "data")]
         (is (= (:status result) :success))
         (is (str/includes? (:value result) ":users"))
         (is (str/includes? (:value result) "Alice"))
         (is (str/includes? (:value result) ":skills"))
         (is (str/includes? (:value result) ":meta"))
-        ;; Verify multi-line pretty-printing
-        (is (> (count (str/split (:value result) #"\n")) 3))))))
+        (is (string? (:value result))))))
+
+(deftest format-result-for-mcp-test
+  (testing "format-result-for-mcp function"
+    (testing "nil value"
+      (is (= (eval-tools/format-result-for-mcp nil nil) "nil"))
+      (is (= (eval-tools/format-result-for-mcp nil "user") "[user] nil")))
+    
+    (testing "simple values"
+      (is (= (eval-tools/format-result-for-mcp 42 nil) "42"))
+      (is (= (eval-tools/format-result-for-mcp "hello" nil) "hello"))
+      (is (= (eval-tools/format-result-for-mcp :keyword nil) ":keyword")))
+    
+    (testing "with namespace context"
+      (is (= (eval-tools/format-result-for-mcp 42 "user") "[user] 42"))
+      (is (= (eval-tools/format-result-for-mcp "hello" "my.ns") "[my.ns] hello")))
+    
+    (testing "complex structures"
+      (is (= (eval-tools/format-result-for-mcp {:a 1} nil) "{:a 1}"))
+      (is (= (eval-tools/format-result-for-mcp [1 2 3] "test") "[test] [1 2 3]"))))))
 
 (deftest load-file-integration-test
   (testing "load-clojure-file with real nREPL server"
@@ -194,6 +210,5 @@
         (is (str/includes? (:value result) ":names"))
         (is (str/includes? (:value result) ":jobs"))
         (is (str/includes? (:value result) "Alice"))
-        (is (str/includes? (:value result) "Engineer"))))))
+        (is (str/includes? (:value result) "Engineer")))))))
 
-;; ...existing unit tests...
