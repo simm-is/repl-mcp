@@ -54,13 +54,35 @@ This starts:
 - **STDIO transport** for MCP communication via stdin/stdout (for local tools) 
 - **HTTP+SSE server** on localhost:18080 (for web-based MCP clients)
 
-### Claude Code Integration
+### Assistant Integration
+
+#### Claude Code
 
 ```bash
 # Add to Claude Code
 claude mcp add repl-mcp -- clojure -M:repl-mcp
 # Or for HTTP SSE transport
 claude mcp add --transport sse repl-mcp http://localhost:18080/sse
+```
+
+#### VS Code
+
+You can manually add it through the UI, or add `.vscode/mcp.json` like this to your project:
+
+```json
+{
+	"servers": {
+		"repl-mcp": {
+			"type": "stdio",
+			"command": "clojure",
+			"args": [
+				"-M:repl-mcp",
+				"--nrepl-port 37888"
+			]
+		}
+	},
+	"inputs": []
+}
 ```
 
 TODO: Add other integration instructions here, please open a PR.
