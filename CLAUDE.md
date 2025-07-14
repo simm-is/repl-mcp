@@ -37,6 +37,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **File reloading**: Use `load-file` after making changes
 - **Code quality/linting**: Use `lint-code` for real-time feedback, `lint-project` for codebase analysis
 - **Dependency management**: Use `add-libs` for runtime dependencies, `sync-deps` for project sync, `check-namespace` for availability
+- **Code navigation**: Use `call-hierarchy` for function relationship analysis, `usage-finder` for comprehensive symbol usage analysis
 - **Debugging**: 
   - **Quick fixes**: Use direct approach for obvious issues (wrong operators, typos, clear logic errors)
   - **Systematic investigation**: Use `debug-function` prompt for complex bugs, unfamiliar code, or when stuck
@@ -91,6 +92,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Dependencies must be available in Maven repositories
 - Project must be using tools.deps (deps.edn) for dependency management
 
+### Advanced Navigation Workflow
+
+**Semantic Code Navigation**: The server includes advanced navigation tools using refactor-nrepl and AST analysis for comprehensive code understanding.
+
+**Available Tools:**
+- **`call-hierarchy`**: Analyze function call relationships and dependencies
+- **`usage-finder`**: Find all usages of symbols across the project with detailed context
+
+**Workflow Integration Patterns:**
+
+1. **Code Understanding**: Use `call-hierarchy` to understand function dependencies and call relationships
+2. **Refactoring Preparation**: Use `usage-finder` to identify all symbol usages before making changes
+3. **Impact Analysis**: Combine both tools to understand the full scope of changes before refactoring
+4. **Codebase Exploration**: Use navigation tools to understand unfamiliar code sections
+
+**Navigation Features:**
+- **AST-based Analysis**: Uses refactor-nrepl's semantic analysis for accurate results
+- **Context-aware Search**: Distinguishes between different usage types (function calls, bindings, references)
+- **Cross-project Analysis**: Handles both project namespaces and external dependencies intelligently
+- **Performance Optimized**: Efficient handling of large codebases with intelligent filtering
+
+**Usage Requirements:**
+- Active nREPL session with refactor-nrepl middleware loaded
+- Project must be loaded in the nREPL for optimal symbol resolution
+- Works best with project namespaces (external namespace support is limited)
+
 ## Commands
 
 ### Development Commands
@@ -124,7 +151,7 @@ clojure -M:repl-mcp --list-prompts
 
 ## Architecture
 
-This is a **Model Context Protocol (MCP) server** for Clojure development with 47 built-in tools. The architecture is built around a unified server design with transport abstraction.
+This is a **Model Context Protocol (MCP) server** for Clojure development with 51 built-in tools. The architecture is built around a unified server design with transport abstraction.
 
 ### Core Components
 
@@ -135,7 +162,7 @@ This is a **Model Context Protocol (MCP) server** for Clojure development with 4
 
 **Tool System**: Dynamic tool registration with runtime addition/removal
 - `dispatch.clj`: Multimethod-based tool routing with registries
-- `tools/`: 47 tools across 8 categories (evaluation, refactoring, cider-nrepl, structural editing, function refactoring, test generation, static analysis, dependency management)
+- `tools/`: 51 tools across 8 categories (evaluation, refactoring, cider-nrepl, structural editing, function refactoring, test generation, static analysis, dependency management, advanced navigation)
 - `interactive.clj`: Runtime tool definition using `register-tool!` function
 
 **Server Core**: Unified server managing both transports simultaneously
@@ -150,7 +177,7 @@ This is a **Model Context Protocol (MCP) server** for Clojure development with 4
 3. **MCP Requests**: Transport -> `dispatch/handle-tool-call` multimethod -> tool handler -> response
 4. **Dynamic Tools**: `interactive/register-tool!` -> `defmethod` -> `dispatch/register-tool!` -> client notifications
 
-### Tool Categories (47 total)
+### Tool Categories (51 total)
 
 **Evaluation (2)**: Direct nREPL integration for code evaluation and file loading
 **Refactoring (11)**: Namespace cleaning, symbol finding, code extraction, import organization
@@ -160,6 +187,7 @@ This is a **Model Context Protocol (MCP) server** for Clojure development with 4
 **Test Generation (1)**: Comprehensive test skeleton generation
 **Static Analysis (3)**: clj-kondo integration for linting, code quality, and style enforcement
 **Dependency Management (3)**: Runtime dependency addition, project synchronization, namespace availability checks
+**Advanced Navigation (2)**: Semantic code navigation using refactor-nrepl and AST analysis for call hierarchy and usage analysis
 
 ### nREPL Integration
 
@@ -201,6 +229,6 @@ The transport system uses protocols (`McpTransport`) for pluggable implementatio
 
 ### Project Integration
 
-This project is designed to be added to other Clojure projects via the `:repl-mcp` alias in `deps.edn`. When users add it to their projects, they get access to all 47 tools for their specific codebase through the nREPL connection.
+This project is designed to be added to other Clojure projects via the `:repl-mcp` alias in `deps.edn`. When users add it to their projects, they get access to all 51 tools for their specific codebase through the nREPL connection.
 
 The MCP server connects to the project's nREPL server to provide tools that operate on the actual project code, making it context-aware for the specific codebase being worked on.

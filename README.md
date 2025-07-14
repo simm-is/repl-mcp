@@ -5,7 +5,7 @@
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for Clojure development that provides built-in tools for interactive coding assistance and structural editing via nREPL integration. You can use it during development, e.g. in Claude code, by just adding it to your project. Optionally you can also use the same functionality to export your own functions through the MCP interface and also run your own dedicated MCP server with a network transport (SSE) for production. The overall philosophy is to minimize friction and speed up the feedback loop with the Clojure REPL during development. MCP supports dynamic exports of tools and prompts, so you can even create your own tools/workflows and use them in your coding assistant without restarts (this [does not work with Claude code as a MCP client yet](https://github.com/anthropics/claude-code/issues/2722).)
 
 **Key Features:**
-- **47 Built-in Tools**: Evaluation, refactoring, cider-nrepl, structural editing, test generation, static analysis, and dependency management
+- **51 Built-in Tools**: Evaluation, refactoring, cider-nrepl, structural editing, function refactoring, test generation, static analysis, dependency management, and advanced navigation
 - **Dynamic Tool Registration**: Add new tools while the server is running
 - **Transport Abstraction**: STDIO and HTTP+SSE transport support
 - **nREPL Integration**: Full cider-nrepl and refactor-nrepl middleware support
@@ -87,7 +87,7 @@ clojure -M:repl-mcp 19888
 (repl-mcp/stop-server!)   ; Stop server
 ```
 
-## Available Tools (47 Total)
+## Available Tools (51 Total)
 
 **Evaluation (2)**: `:eval`, `:load-file`  
 **Refactoring (11)**: `:clean-ns`, `:find-symbol`, `:rename-file-or-dir`, `:resolve-missing`, `:find-used-locals`, `:extract-function`, `:extract-variable`, `:add-function-parameter`, `:organize-imports`, `:inline-function`, `:rename-local-variable`  
@@ -96,7 +96,8 @@ clojure -M:repl-mcp 19888
 **Function Refactoring (5)**: `:find-function-definition`, `:rename-function-in-file`, `:find-function-usages-in-project`, `:rename-function-across-project`, `:replace-function-definition`  
 **Test Generation (1)**: `:create-test-skeleton`  
 **Static Analysis (3)**: `:lint-code`, `:lint-project`, `:setup-clj-kondo`  
-**Dependency Management (3)**: `:add-libs`, `:sync-deps`, `:check-namespace`
+**Dependency Management (3)**: `:add-libs`, `:sync-deps`, `:check-namespace`  
+**Advanced Navigation (2)**: `:call-hierarchy`, `:usage-finder`
 
 ### Code Quality Tools
 
@@ -140,6 +141,32 @@ The integrated clj-kondo static analysis provides:
 - Clojure 1.12+ (for add-libs functionality)
 - REPL context (only works within active nREPL session)
 - Maven-compatible dependencies (mvn/version coordinates)
+
+### Advanced Navigation Tools
+
+**Semantic code navigation using refactor-nrepl and AST analysis:**
+
+- **`:call-hierarchy`**: Analyze function call relationships in your project
+  - Find all functions that call a specific function (callers analysis)
+  - Supports configurable depth traversal for comprehensive analysis
+  - Integrates with refactor-nrepl for accurate semantic information
+  - Handles both project namespaces and external dependencies intelligently
+  
+- **`:usage-finder`**: Find all usages of a symbol across the project
+  - Comprehensive symbol usage analysis with detailed context
+  - Categorizes usages by type (function calls, bindings, references)
+  - Provides file-level and project-level usage statistics
+  - Supports both local project symbols and external namespace symbols
+
+**Features:**
+- **Semantic Analysis**: Uses refactor-nrepl's AST traversal for accurate results
+- **Context-Aware**: Distinguishes between different usage types and contexts
+- **Performance Optimized**: Efficient handling of large codebases with intelligent filtering
+- **Error Resilient**: Graceful handling of external namespaces and missing symbols
+
+**Requirements:**
+- Active nREPL session with refactor-nrepl middleware
+- Project must be loaded in the nREPL for optimal symbol resolution
 
 ## Development
 
