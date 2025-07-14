@@ -193,7 +193,7 @@ The integrated clj-kondo static analysis provides:
   "Description of what the tool does"
   {:param1 {:type "string" :description "First parameter"}}
   (fn [tool-call context]
-    {:result "Processed" :status :success}))
+    {:value "Processed" :status :success}))
 ```
 
 Tools are immediately available via MCP with client notifications. For permanent tools, create a namespace in `src/is/simm/repl_mcp/tools/`.
@@ -218,7 +218,7 @@ Use repl-mcp as a library to build custom MCP servers:
   :my-tool "Custom tool description"
   {:param {:type "string" :description "Parameter description"}}
   (fn [tool-call context]
-    {:result "Custom tool result" :status :success}))
+    {:value "Custom tool result" :status :success}))
 
 ;; Create and start server (requires Jetty)
 (defn start-custom-server! []
