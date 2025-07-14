@@ -27,13 +27,20 @@
                             :else acc))
                         {} responses)]
       (if (:error result)
-        {:error (:error result)
-         :output (:output result)
-         :status :error}
-        {:cleaned-ns (:cleaned-ns result)
-         :output (:output result)
-         :file-path file-path
-         :status :success}))
+        (let [error-msg (:error result)
+              output (:output result)
+              combined-error (if (seq output)
+                              (str error-msg "\nOutput: " output)
+                              error-msg)]
+          {:error combined-error
+           :status :error})
+        (let [cleaned-ns (:cleaned-ns result)
+              output (:output result)
+              combined-value (if (seq output)
+                              (str "Cleaned namespace: " file-path "\nResult: " cleaned-ns "\nOutput: " output)
+                              (str "Cleaned namespace: " file-path "\nResult: " cleaned-ns))]
+          {:value combined-value
+           :status :success})))
     (catch Exception e
       (log/log! {:level :error :msg "Error cleaning namespace" :data {:error (.getMessage e)}})
       {:error (.getMessage e)
@@ -105,14 +112,20 @@
                             :else acc))
                         {} responses)]
       (if (:error result)
-        {:error (:error result)
-         :output (:output result)
-         :status :error}
-        {:touched (:touched result)
-         :output (:output result)
-         :old-path old-path
-         :new-path new-path
-         :status :success}))
+        (let [error-msg (:error result)
+              output (:output result)
+              combined-error (if (seq output)
+                              (str error-msg "\nOutput: " output)
+                              error-msg)]
+          {:error combined-error
+           :status :error})
+        (let [touched (:touched result)
+              output (:output result)
+              combined-value (if (seq output)
+                              (str "Renamed " old-path " to " new-path "\nTouched files: " touched "\nOutput: " output)
+                              (str "Renamed " old-path " to " new-path "\nTouched files: " touched))]
+          {:value combined-value
+           :status :success})))
     (catch Exception e
       (log/log! {:level :error :msg "Error renaming file or directory" :data {:error (.getMessage e)}})
       {:error (.getMessage e)
@@ -144,14 +157,20 @@
                             :else acc))
                         {} responses)]
       (if (:error result)
-        {:error (:error result)
-         :output (:output result)
-         :status :error}
-        {:candidates (:candidates result)
-         :output (:output result)
-         :symbol symbol
-         :namespace namespace
-         :status :success}))
+        (let [error-msg (:error result)
+              output (:output result)
+              combined-error (if (seq output)
+                              (str error-msg "\nOutput: " output)
+                              error-msg)]
+          {:error combined-error
+           :status :error})
+        (let [candidates (:candidates result)
+              output (:output result)
+              combined-value (if (seq output)
+                              (str "Resolved " namespace "/" symbol "\nCandidates: " candidates "\nOutput: " output)
+                              (str "Resolved " namespace "/" symbol "\nCandidates: " candidates))]
+          {:value combined-value
+           :status :success})))
     (catch Exception e
       (log/log! {:level :error :msg "Error resolving missing symbol" :data {:error (.getMessage e)}})
       {:error (.getMessage e)
@@ -184,15 +203,20 @@
                             :else acc))
                         {} responses)]
       (if (:error result)
-        {:error (:error result)
-         :output (:output result)
-         :status :error}
-        {:used-locals (:used-locals result)
-         :output (:output result)
-         :file-path file-path
-         :line line
-         :column column
-         :status :success}))
+        (let [error-msg (:error result)
+              output (:output result)
+              combined-error (if (seq output)
+                              (str error-msg "\nOutput: " output)
+                              error-msg)]
+          {:error combined-error
+           :status :error})
+        (let [used-locals (:used-locals result)
+              output (:output result)
+              combined-value (if (seq output)
+                              (str "Used locals at " file-path ":" line ":" column "\nLocals: " used-locals "\nOutput: " output)
+                              (str "Used locals at " file-path ":" line ":" column "\nLocals: " used-locals))]
+          {:value combined-value
+           :status :success})))
     (catch Exception e
       (log/log! {:level :error :msg "Error finding used locals" :data {:error (.getMessage e)}})
       {:error (.getMessage e)

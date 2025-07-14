@@ -3,7 +3,9 @@
             [is.simm.repl-mcp.tools.eval :as eval-tools]
             [clojure.string :as str]
             [nrepl.server :as nrepl-server]
-            [nrepl.core :as nrepl]))
+            [nrepl.core :as nrepl]
+            [cider.nrepl :refer [cider-nrepl-handler]]
+            [refactor-nrepl.middleware :refer [wrap-refactor]]))
 
 ;; Simple tests that verify the functions exist and handle basic error cases
 ;; Full integration tests would require a running nREPL server
@@ -77,7 +79,7 @@
 (defn start-test-nrepl-server!
   "Start an nREPL server for testing and return [server client]"
   []
-  (let [server (nrepl-server/start-server :port 0) ; Use random available port
+  (let [server (nrepl-server/start-server :port 0 :handler (wrap-refactor cider-nrepl-handler)) ; Use random available port with middleware
         port (:port server)
         conn (nrepl/connect :port port)
         client (nrepl/client conn 1000)]  ; Create a client with timeout
@@ -153,7 +155,7 @@
       (let [result (eval-tools/eval-code *nrepl-client* "(do (println \"Hello from nREPL!\") 42)")]
         (is (= (:status result) :success))
         (is (str/includes? (:value result) "42"))
-        (is (str/includes? (:output result) "Hello from nREPL!"))))
+        (is (str/includes? (:value result) "Hello from nREPL!"))))
     
     (testing "complex nested structures"
       ;; First define the data structure

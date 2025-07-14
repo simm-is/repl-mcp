@@ -40,12 +40,20 @@
           _ (log/log! {:level :debug :msg "nREPL combined" :data {:combined combined}})
           
           result (cond
-                   (:err combined) {:error (:err combined)
-                                   :output (:out combined)
-                                   :status :error}
-                   :else {:value (format-result-for-mcp (first values) namespace)
-                         :output (:out combined)
-                         :status :success})]
+                   (:err combined) (let [output (:out combined)
+                                        error-msg (:err combined)
+                                        combined-error (if (seq output)
+                                                        (str error-msg "\nOutput: " output)
+                                                        error-msg)]
+                                    {:error combined-error
+                                     :status :error})
+                   :else (let [eval-result (format-result-for-mcp (first values) namespace)
+                              output (:out combined)
+                              combined-value (if (seq output)
+                                              (str eval-result "\nOutput: " output)
+                                              eval-result)]
+                          {:value combined-value
+                           :status :success}))]
       (log/log! {:level :info :msg "Eval completed" :data {:code code :result result}})
       (logging/log-eval-call code namespace timeout result)
       result)
@@ -101,13 +109,20 @@
                             :else acc))
                         {} responses)]
       (if (:error result)
-        {:error (:error result)
-         :output (:output result)
-         :status :error}
-        {:value (:value result)
-         :output (:output result)
-         :file-path file-path
-         :status :success}))
+        (let [error-msg (:error result)
+              output (:output result)
+              combined-error (if (seq output)
+                              (str error-msg "\nOutput: " output)
+                              error-msg)]
+          {:error combined-error
+           :status :error})
+        (let [load-result (:value result)
+              output (:output result)
+              combined-value (if (seq output)
+                              (str "File loaded: " file-path "\nResult: " load-result "\nOutput: " output)
+                              (str "File loaded: " file-path "\nResult: " load-result))]
+          {:value combined-value
+           :status :success})))
     (catch Exception e
       (log/log! {:level :error :msg "Error loading file" :data {:error (.getMessage e) :file-path file-path}})
       {:error (.getMessage e)

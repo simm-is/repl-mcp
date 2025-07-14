@@ -54,12 +54,10 @@
                                                    (str (cond
                                                           ;; Handle plain string results
                                                           (string? result) result
-                                                          ;; Handle map results with summary/value/output
-                                                          (map? result) (cond
-                                                                         (:summary result) (:summary result)
-                                                                         (contains? result :value) (pr-str (:value result))
-                                                                         (contains? result :output) (str (:output result))
-                                                                         :else (json/write-str result))
+                                                          ;; Handle map results with value field
+                                                          (map? result) (if (contains? result :value)
+                                                                         (str (:value result))
+                                                                         (json/write-str result))
                                                           ;; Default fallback
                                                           :else (str result)))))
                                                  false))]

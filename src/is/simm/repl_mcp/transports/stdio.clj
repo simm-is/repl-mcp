@@ -8,6 +8,43 @@
            [io.modelcontextprotocol.spec McpSchema$ServerCapabilities]))
 
 ;; =============================================================================
+;; Transport Readiness Functions
+;; =============================================================================
+
+(defn wait-for-transport-ready 
+  "Wait for the MCP transport to be ready for tool registration.
+   Tests transport readiness by attempting a safe operation and retrying until success or timeout."
+  [mcp-server timeout-ms]
+  (let [start-time (System/currentTimeMillis)
+        max-attempts (max 1 (quot timeout-ms 50))]
+    (log/log! {:level :debug :msg "Waiting for transport to be ready" 
+               :data {:timeout-ms timeout-ms :max-attempts max-attempts}})
+    (loop [attempt 1]
+      (let [result (try
+                     ;; Test transport readiness with a safe notification that doesn't require clients
+                     (.notifyToolsListChanged mcp-server)
+                     (log/log! {:level :debug :msg "Transport ready" :data {:attempt attempt}})
+                     :ready
+                     (catch Exception e
+                       (let [elapsed (- (System/currentTimeMillis) start-time)]
+                         (if (and (< attempt max-attempts) (< elapsed timeout-ms))
+                           (do
+                             (log/log! {:level :debug :msg "Transport not ready, retrying..." 
+                                        :data {:attempt attempt :elapsed-ms elapsed :error (.getMessage e)}})
+                             (Thread/sleep 50)
+                             :retry)
+                           (let [error-msg "MCP transport not ready within timeout"]
+                             (log/log! {:level :error :msg "Transport failed to become ready within timeout" 
+                                        :data {:timeout-ms timeout-ms :attempts attempt :final-error (.getMessage e)}})
+                             (throw (ex-info error-msg 
+                                            {:timeout-ms timeout-ms 
+                                             :attempts attempt 
+                                             :error (.getMessage e)})))))))]
+        (if (= result :retry)
+          (recur (inc attempt))
+          result)))))
+
+;; =============================================================================
 ;; STDIO Transport Implementation
 ;; =============================================================================
 
@@ -37,6 +74,9 @@
                            (.serverInfo "repl-mcp-stdio" "1.0.0")
                            (.capabilities capabilities)
                            (.build))]
+            
+            ;; Wait for transport to be ready before registering tools
+            (wait-for-transport-ready mcp-srv 5000)
             
             ;; Register tools from context
             (let [tools (vals (:tools context))]

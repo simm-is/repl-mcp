@@ -20,6 +20,7 @@
 (require '[is.simm.repl-mcp.tools.test-generation])
 (require '[is.simm.repl-mcp.tools.clj-kondo])
 (require '[is.simm.repl-mcp.tools.deps-management])
+(require '[is.simm.repl-mcp.tools.navigation])
 
 (defn get-prompt-args
   "Get argument definitions for specific prompts"
@@ -242,18 +243,22 @@
     
     (case command
       :help
-      (print-help)
-      
+      (do
+        (print-help)
+        (System/exit 0))
+
       :list-tools
-      (do 
+      (do
         ;; Need to initialize tools for introspection
-        (print-tools))
-      
+        (print-tools)
+        (System/exit 0))
+
       :list-prompts
       (do
         ;; Need to initialize tools for introspection
-        (print-prompts))
-      
+        (print-prompts)
+        (System/exit 0))
+
       :tool-help
       (if tool-name
         (print-tool-help tool-name)
@@ -262,18 +267,18 @@
           (println "Usage: clojure -M:run --tool-help TOOL_NAME")
           (println "Use --list-tools to see available tools")
           (System/exit 1)))
-      
+
       :tool-help-missing-name
       (do
         (println "Error: --tool-help requires a tool name")
         (println "Usage: clojure -M:run --tool-help TOOL_NAME")
         (System/exit 1))
-      
+
       :start
       (do
         ;; Logging is already setup at namespace load time
         (start-server! :nrepl-port nrepl-port :transports transports)
-        
+
         ;; Do not print to stdout when using STDIO transport - 
         ;; stdout is reserved for JSON-RPC messages only
         ;; All status/debug info goes to log file instead
@@ -281,7 +286,7 @@
         (log/log! {:level :info :msg "Available tools" :data {:tools (keys (list-tools))}})
         (log/log! {:level :info :msg "Available prompts" :data {:prompts (keys (list-prompts))}})
         (log/log! {:level :info :msg "Server ready for connections" :data {:transports transports}})
-        
+
         ;; Keep the main thread alive
         (while true
           (Thread/sleep 1000))))))

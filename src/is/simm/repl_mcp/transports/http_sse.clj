@@ -48,19 +48,35 @@
               ;; Convert Java HashMap to Clojure map for easier access
               args (into {} request)
               raw-tool-call {:name tool-name :arguments args}
-              tool-call (dispatch/mcp-tool-call->clj raw-tool-call)
-              result (dispatch/handle-tool-call tool-call context)]
+              tool-call (dispatch/mcp-tool-call->clj raw-tool-call)]
           
-          ;; Convert result to MCP format
-          (if (= (:status result) :success)
-            (McpSchema$CallToolResult. 
-              (java.util.List/of 
-                (McpSchema$TextContent. (str (:value result))))
-              false)
-            (McpSchema$CallToolResult. 
-              (java.util.List/of 
-                (McpSchema$TextContent. (str (:error result))))
-              true)))
+          (log/log! {:level :info :msg "HTTP SSE tool handler starting" 
+                     :data {:tool-name tool-name :args args :tool-call tool-call}})
+          
+          (let [result (dispatch/handle-tool-call tool-call context)]
+            (log/log! {:level :info :msg "HTTP SSE tool handler got result" 
+                       :data {:tool-name tool-name :result result :result-keys (when (map? result) (keys result))}})
+            
+            ;; Convert result to MCP format with better field handling
+            (if (= (:status result) :success)
+              (let [content-text (if (:value result)
+                                   (str (:value result))
+                                   (str result))
+                    mcp-result (McpSchema$CallToolResult. 
+                                (java.util.List/of 
+                                  (McpSchema$TextContent. content-text))
+                                false)]
+                (log/log! {:level :info :msg "HTTP SSE tool handler created success result" 
+                           :data {:tool-name tool-name :content-text content-text :mcp-result-type (str (type mcp-result))}})
+                mcp-result)
+              (let [error-text (str (:error result))
+                    mcp-result (McpSchema$CallToolResult. 
+                                (java.util.List/of 
+                                  (McpSchema$TextContent. error-text))
+                                true)]
+                (log/log! {:level :info :msg "HTTP SSE tool handler created error result" 
+                           :data {:tool-name tool-name :error-text error-text}})
+                mcp-result))))
         
         (catch Exception e
           (log/log! {:level :error :msg "Error in tool handler" 

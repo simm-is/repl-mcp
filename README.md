@@ -43,8 +43,10 @@ Also make sure to provide the `Instructions` section from `CLAUDE.md` to your as
 ### Start the MCP Server
 
 ```bash
-# In your project directory
+# In your project directory for STDIO (default)
 clojure -M:repl-mcp
+# Or with HTTP SSE transport only
+clojure -M:repl-mcp --nrepl-port 27889 --http-only 
 ```
 
 This starts:
@@ -57,6 +59,8 @@ This starts:
 ```bash
 # Add to Claude Code
 claude mcp add repl-mcp -- clojure -M:repl-mcp
+# Or for HTTP SSE transport
+claude mcp add --transport sse repl-mcp http://localhost:18080/sse
 ```
 
 TODO: Add other integration instructions here, please open a PR.

@@ -15,7 +15,7 @@
         (let [responses (nrepl/message nrepl-client {:op "format-code" :code code})
               result (first responses)]
           (if (:formatted-code result)
-            {:formatted-code (:formatted-code result) :status :success}
+            {:value (:formatted-code result) :status :success}
             {:error "Failed to format code" :status :error}))
         (catch Exception e
           (log/log! {:level :error :msg "Error formatting code" :data {:error (.getMessage e)}})
@@ -32,7 +32,7 @@
         (let [responses (nrepl/message nrepl-client {:op "macroexpand" :code code})
               result (first responses)]
           (if (:expansion result)
-            {:expansion (:expansion result) :status :success}
+            {:value (:expansion result) :status :success}
             {:error "Failed to expand macro" :status :error}))
         (catch Exception e
           (log/log! {:level :error :msg "Error expanding macro" :data {:error (.getMessage e)}})
@@ -51,12 +51,12 @@
         (let [responses (nrepl/message nrepl-client {:op "eldoc" :symbol symbol :ns ns})
               result (first responses)]
           (if (:eldoc result)
-            {:symbol (:name result)
-             :ns (:ns result)
-             :type (:type result)
-             :docstring (:docstring result)
-             :signatures (:eldoc result)
-             :status :success}
+            (let [info (str "Symbol: " (:name result) "\n"
+                           "Namespace: " (:ns result) "\n"
+                           "Type: " (:type result) "\n"
+                           "Documentation: " (:docstring result) "\n"
+                           "Signatures: " (:eldoc result))]
+              {:value info :status :success})
             {:error "Symbol not found or no documentation available" :status :error}))
         (catch Exception e
           (log/log! {:level :error :msg "Error getting eldoc" :data {:error (.getMessage e)}})
@@ -75,9 +75,10 @@
         (let [responses (nrepl/message nrepl-client {:op "complete" :prefix prefix :ns ns})
               result (first responses)]
           (if (:completions result)
-            {:completions (:completions result)
-             :count (count (:completions result))
-             :status :success}
+            (let [completions (:completions result)
+                  summary (str "Found " (count completions) " completions:\n"
+                              (clojure.string/join "\n" (map :candidate completions)))]
+              {:value summary :status :success})
             {:error "No completions found" :status :error}))
         (catch Exception e
           (log/log! {:level :error :msg "Error getting completions" :data {:error (.getMessage e)}})
@@ -98,9 +99,10 @@
         (let [responses (nrepl/message nrepl-client msg)
               result (first responses)]
           (if (:apropos-matches result)
-            {:matches (:apropos-matches result)
-             :count (count (:apropos-matches result))
-             :status :success}
+            (let [matches (:apropos-matches result)
+                  summary (str "Found " (count matches) " matches:\n"
+                              (clojure.string/join "\n" matches))]
+              {:value summary :status :success})
             {:error "No matches found" :status :error}))
         (catch Exception e
           (log/log! {:level :error :msg "Error searching symbols" :data {:error (.getMessage e)}})
@@ -117,10 +119,14 @@
               results (filter :results responses)
               summary (first (filter :summary responses))]
           (if summary
-            {:summary (:summary summary)
-             :elapsed-time (:elapsed-time summary)
-             :results (if (seq results) (:results (first results)) {})
-             :status :success}
+            (let [test-summary (:summary summary)
+                  elapsed (:elapsed-time summary)
+                  test-results (if (seq results) (:results (first results)) {})
+                  summary-text (str "Test Summary:\n"
+                                   "Elapsed time: " elapsed "ms\n"
+                                   "Summary: " (pr-str test-summary) "\n"
+                                   "Results: " (pr-str test-results))]
+              {:value summary-text :status :success})
             {:error "Failed to run tests" :status :error}))
         (catch Exception e
           (log/log! {:level :error :msg "Error running tests" :data {:error (.getMessage e)}})
@@ -141,7 +147,7 @@
           (if (:status result)
             (if (contains? (set (:status result)) "no-info")
               {:error "No information available for symbol" :status :error}
-              {:info (dissoc result :id :session :status) :status :success})
+              {:value (pr-str (dissoc result :id :session :status)) :status :success})
             {:error "Failed to get symbol info" :status :error}))
         (catch Exception e
           (log/log! {:level :error :msg "Error getting symbol info" :data {:error (.getMessage e)}})
@@ -161,9 +167,10 @@
         (let [responses (nrepl/message nrepl-client {:op "ns-list"})
               result (first responses)]
           (if (:ns-list result)
-            {:namespaces (:ns-list result)
-             :count (count (:ns-list result))
-             :status :success}
+            (let [namespaces (:ns-list result)
+                  summary (str "Found " (count namespaces) " namespaces:\n"
+                              (clojure.string/join "\n" namespaces))]
+              {:value summary :status :success})
             {:error "Failed to list namespaces" :status :error}))
         (catch Exception e
           (log/log! {:level :error :msg "Error listing namespaces" :data {:error (.getMessage e)}})
@@ -179,10 +186,11 @@
         (let [responses (nrepl/message nrepl-client {:op "ns-vars" :ns ns})
               result (first responses)]
           (if (:ns-vars result)
-            {:namespace ns
-             :vars (:ns-vars result)
-             :count (count (:ns-vars result))
-             :status :success}
+            (let [vars (:ns-vars result)
+                  summary (str "Namespace: " ns "\n"
+                              "Found " (count vars) " vars:\n"
+                              (clojure.string/join "\n" vars))]
+              {:value summary :status :success})
             {:error (str "Failed to get vars for namespace: " ns) :status :error}))
         (catch Exception e
           (log/log! {:level :error :msg "Error getting namespace vars" :data {:error (.getMessage e)}})
@@ -198,9 +206,10 @@
         (let [responses (nrepl/message nrepl-client {:op "classpath"})
               result (first responses)]
           (if (:classpath result)
-            {:classpath (:classpath result)
-             :count (count (:classpath result))
-             :status :success}
+            (let [classpath (:classpath result)
+                  summary (str "Found " (count classpath) " classpath entries:\n"
+                              (clojure.string/join "\n" classpath))]
+              {:value summary :status :success})
             {:error "Failed to get classpath" :status :error}))
         (catch Exception e
           (log/log! {:level :error :msg "Error getting classpath" :data {:error (.getMessage e)}})
@@ -232,12 +241,16 @@
           
           (let [successful (count (filter #(= :success (:status %)) @refresh-results))
                 failed (count (filter #(= :error (:status %)) @refresh-results))]
-            {:refreshed-count successful
-             :failed-count failed
-             :protected-count (- (count all-namespaces) (count user-ns-names))
-             :refreshed-namespaces (map :namespace (filter #(= :success (:status %)) @refresh-results))
-             :failed-namespaces (map :namespace (filter #(= :error (:status %)) @refresh-results))
-             :status :success})))
+            (let [protected-count (- (count all-namespaces) (count user-ns-names))
+                  refreshed-ns (map :namespace (filter #(= :success (:status %)) @refresh-results))
+                  failed-ns (map :namespace (filter #(= :error (:status %)) @refresh-results))
+                  summary (str "Refresh completed:\n"
+                              "Refreshed: " successful " namespaces\n"
+                              "Failed: " failed " namespaces\n"
+                              "Protected: " protected-count " namespaces\n"
+                              "Refreshed namespaces: " (clojure.string/join ", " refreshed-ns) "\n"
+                              "Failed namespaces: " (clojure.string/join ", " failed-ns))]
+              {:value summary :status :success}))))
       (catch Exception e
         (log/log! {:level :error :msg "Error during safe refresh" :data {:error (.getMessage e)}})
         {:error (.getMessage e) :status :error}))))
@@ -268,11 +281,13 @@
             (let [results (filter :results responses)
                   summary (first (filter :summary responses))]
               (if summary
-                {:summary (:summary summary)
-                 :results (if (seq results) (:results (first results)) {})
-                 :var-query var-query
-                 :query-map query-map
-                 :status :success}
+                (let [test-summary (:summary summary)
+                      test-results (if (seq results) (:results (first results)) {})
+                      summary-text (str "Test Query Results:\n"
+                                       "Query: " var-query "\n"
+                                       "Summary: " (pr-str test-summary) "\n"
+                                       "Results: " (pr-str test-results))]
+                  {:value summary-text :status :success})
                 {:error "No test results found" :status :error}))
             {:error "No responses from nREPL client" :status :error}))
         (catch Exception e
