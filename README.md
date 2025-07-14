@@ -87,15 +87,6 @@ You can manually add it through the UI, or add `.vscode/mcp.json` like this to y
 
 TODO: Add other integration instructions here, please open a PR.
 
-## Custom Ports
-
-To avoid port conflicts:
-
-```bash
-# Start with custom nREPL port
-clojure -M:repl-mcp 19888
-```
-
 ## Interactive Usage
 
 ```clojure
