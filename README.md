@@ -45,7 +45,7 @@ Also make sure to provide the `Instructions` section from `CLAUDE.md` to your as
 ```bash
 # In your project directory for STDIO (default)
 clojure -M:repl-mcp
-# Or with HTTP SSE transport only
+# Or with HTTP SSE transport (this can help to avoid timeouts on startups)
 clojure -M:repl-mcp --nrepl-port 27889 --http-only 
 ```
 
