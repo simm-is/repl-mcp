@@ -21,6 +21,7 @@
 (require '[is.simm.repl-mcp.tools.clj-kondo])
 (require '[is.simm.repl-mcp.tools.deps-management])
 (require '[is.simm.repl-mcp.tools.navigation])
+(require '[is.simm.repl-mcp.tools.performance])
 
 (defn get-prompt-args
   "Get argument definitions for specific prompts"

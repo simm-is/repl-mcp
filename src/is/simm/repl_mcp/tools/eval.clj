@@ -22,15 +22,22 @@
                                       :or {timeout 5000}}]
   (try
     (log/log! {:level :info :msg "Starting eval" :data {:code code :namespace namespace :timeout timeout}})
+    (when (nil? nrepl-client)
+      (throw (Exception. "nREPL client is nil")))
     (let [;; Create a session if needed
-          session-responses (nrepl/message nrepl-client {:op "clone"})
+          clone-msg {:op "clone"}
+          _ (log/log! {:level :debug :msg "Sending clone message" :data {:clone-msg clone-msg}})
+          session-responses (nrepl/message nrepl-client clone-msg)
+          _ (log/log! {:level :debug :msg "Clone responses" :data {:session-responses session-responses}})
           session-id (-> session-responses first :new-session)
+          _ (log/log! {:level :debug :msg "Session created" :data {:session-id session-id}})
           eval-msg (cond-> {:op "eval" :code code :session session-id}
                      namespace (assoc :ns namespace)
                      timeout (assoc :timeout timeout))
+          _ (log/log! {:level :debug :msg "Sending eval message" :data {:eval-msg eval-msg}})
           
           responses (doall (nrepl/message nrepl-client eval-msg))
-          _ (log/log! {:level :debug :msg "nREPL responses" :data {:responses responses}})
+          _ (log/log! {:level :debug :msg "Raw nREPL responses" :data {:responses responses :response-count (count responses)}})
           
           ;; Use response-values as intended by nREPL
           values (nrepl/response-values responses)
@@ -71,23 +78,30 @@
    :namespace {:type "string" :optional true :description "Namespace to evaluate in"}
    :timeout {:type "number" :optional true :description "Timeout in milliseconds"}}
   (fn [tool-call context]
-    (log/log! {:level :info :msg "Eval tool entry" 
-               :data {:tool-call tool-call :context-keys (keys context)}})
-    (let [{:strs [code namespace timeout]} (:args tool-call)
-          nrepl-client (:nrepl-client context)]
-      (log/log! {:level :info :msg "Eval tool called" 
-                 :data {:args (:args tool-call) 
-                        :code code 
-                        :namespace namespace 
-                        :timeout timeout
-                        :nrepl-client-available? (some? nrepl-client)}})
-      (when (nil? code)
-        (log/log! {:level :error :msg "Code is nil!" :data {:args (:args tool-call)}}))
-      (when (nil? nrepl-client)
-        (log/log! {:level :error :msg "nREPL client is nil!" :data {:context context}}))
-      (let [result (eval-code nrepl-client code :namespace namespace :timeout (or timeout 5000))]
-        (log/log! {:level :info :msg "Eval tool result" :data {:result result}})
-        result)))
+    (try
+      (log/log! {:level :info :msg "Eval tool entry" 
+                 :data {:tool-call tool-call :context-keys (keys context)}})
+      (let [{:strs [code namespace timeout]} (:args tool-call)
+            nrepl-client (:nrepl-client context)]
+        (log/log! {:level :info :msg "Eval tool called" 
+                   :data {:args (:args tool-call) 
+                          :code code 
+                          :namespace namespace 
+                          :timeout timeout
+                          :nrepl-client-available? (some? nrepl-client)}})
+        (when (nil? code)
+          (log/log! {:level :error :msg "Code is nil!" :data {:args (:args tool-call)}}))
+        (when (nil? nrepl-client)
+          (log/log! {:level :error :msg "nREPL client is nil!" :data {:context context}}))
+        (let [result (eval-code nrepl-client code :namespace namespace :timeout (or timeout 5000))]
+          (log/log! {:level :info :msg "Eval tool result" :data {:result result}})
+          result))
+      (catch Exception e
+        (log/log! {:level :error :msg "Eval tool handler failed" 
+                   :data {:error (.getMessage e) 
+                          :stack-trace (str e)
+                          :tool-call tool-call}})
+        {:error (.getMessage e) :status :error})))
   :tags #{:development :repl :evaluation}
   :dependencies #{:nrepl})
 
@@ -97,6 +111,8 @@
   [nrepl-client file-path]
   (try
     (log/log! {:level :info :msg "Loading file" :data {:file-path file-path}})
+    (when (nil? nrepl-client)
+      (throw (Exception. "nREPL client is nil")))
     (let [file-content (slurp file-path)
           responses (nrepl/message nrepl-client {:op "load-file" 
                                                 :file file-content 
@@ -132,8 +148,17 @@
   "Load a Clojure file into the nREPL session"
   {:file-path {:type "string" :description "Path to the Clojure file to load"}}
   (fn [tool-call context]
-    (let [{:strs [file-path]} (:args tool-call)
-          nrepl-client (:nrepl-client context)]
-      (load-clojure-file nrepl-client file-path)))
+    (try
+      (let [{:strs [file-path]} (:args tool-call)
+            nrepl-client (:nrepl-client context)]
+        (log/log! {:level :info :msg "Load-file tool called" 
+                   :data {:file-path file-path :nrepl-client-available? (some? nrepl-client)}})
+        (load-clojure-file nrepl-client file-path))
+      (catch Exception e
+        (log/log! {:level :error :msg "Load-file tool handler failed" 
+                   :data {:error (.getMessage e) 
+                          :stack-trace (str e)
+                          :tool-call tool-call}})
+        {:error (.getMessage e) :status :error})))
   :tags #{:development :repl :file-loading}
   :dependencies #{:nrepl})
