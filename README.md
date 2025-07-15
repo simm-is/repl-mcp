@@ -5,12 +5,13 @@
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for Clojure development that provides built-in tools for interactive coding assistance and structural editing via nREPL integration. You can use it during development, e.g. in Claude code, by just adding it to your project. Optionally you can also use the same functionality to export your own functions through the MCP interface and also run your own dedicated MCP server with a network transport (SSE) for production. The overall philosophy is to minimize friction and speed up the feedback loop with the Clojure REPL during development. MCP supports dynamic exports of tools and prompts, so you can even create your own tools/workflows and use them in your coding assistant without restarts (this [does not work with Claude code as a MCP client yet](https://github.com/anthropics/claude-code/issues/2722).)
 
 **Key Features:**
-- **51 Built-in Tools**: Evaluation, refactoring, cider-nrepl, structural editing, function refactoring, test generation, static analysis, dependency management, and advanced navigation
+- **53 Development Tools**: Evaluation, refactoring, cider-nrepl, structural editing, function refactoring, test generation, static analysis, dependency management, advanced navigation, and profiling
 - **Dynamic Tool Registration**: Add new tools while the server is running
 - **Transport Abstraction**: STDIO and HTTP+SSE transport support
 - **nREPL Integration**: Full cider-nrepl and refactor-nrepl middleware support
 - **Code Quality**: Integrated clj-kondo linting for real-time feedback
 - **Runtime Dependencies**: Hot-load dependencies without REPL restart (Clojure 1.12+)
+- **Performance Analysis**: CPU and memory profiling with flame graph generation
 
 Create project-specific tools interactively for reliable, predictable workflows. Configure your coding assistant to prefer these tools via [CLAUDE.md](./CLAUDE.md) in your project.
 
@@ -25,14 +26,29 @@ Add repl-mcp to your `deps.edn` dependencies and include the `:repl-mcp` alias (
                           :git/sha "latest-sha"}}
  :aliases
  {:repl-mcp {:main-opts ["-m" "is.simm.repl-mcp"]
+             ;; Optional, for profiling:
+             :jvm-opts ["-Djdk.attach.allowAttachSelf"
+                        "-XX:+UnlockDiagnosticVMOptions"
+                        "-XX:+DebugNonSafepoints"
+                        "-XX:+EnableDynamicAgentLoading"
+                        "--enable-native-access=ALL-UNNAMED"]
              :extra-deps {nrepl/nrepl {:mvn/version "1.0.0"}
                           cider/cider-nrepl {:mvn/version "0.47.1"}
                           rewrite-clj/rewrite-clj {:mvn/version "1.1.47"}
                           refactor-nrepl/refactor-nrepl {:mvn/version "3.10.0"}
                           dev.weavejester/cljfmt {:mvn/version "0.13.1"}
                           clj-kondo/clj-kondo {:mvn/version "2025.06.05"}
+                          ;; Optional for profiling tools
+                          criterium/criterium {:mvn/version "0.4.6"}
+                          com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.6.1"}
+
                           org.slf4j/slf4j-api {:mvn/version "2.0.17"}
+                          ;; TODO figure out how to redirect SLF4J to telemere
+                          ;; Use nop logging to not accidentally log to STDOUT
                           org.slf4j/slf4j-nop {:mvn/version "2.0.17"}
+                          ;; Or for SSE you can use
+                          #_#_org.slf4j/slf4j-simple {:mvn/version "2.0.17"}
+                          ;; For SSE support in REPL server
                           org.eclipse.jetty.ee10/jetty-ee10-servlet {:mvn/version "12.0.5"}
                           org.eclipse.jetty/jetty-server {:mvn/version "12.0.5"}
                           jakarta.servlet/jakarta.servlet-api {:mvn/version "6.0.0"}}}}}
@@ -43,10 +59,10 @@ Also make sure to provide the `Instructions` section from `CLAUDE.md` to your as
 ### Start the MCP Server
 
 ```bash
-# In your project directory for STDIO (default)
-clojure -M:repl-mcp
-# Or with HTTP SSE transport (this can help to avoid timeouts on startups)
+# HTTP SSE transport (better to keep running in the background)
 clojure -M:repl-mcp --nrepl-port 27889 --http-only 
+# STDIO (default)
+clojure -M:repl-mcp
 ```
 
 This starts:
@@ -59,10 +75,10 @@ This starts:
 #### Claude Code
 
 ```bash
-# Add to Claude Code
-claude mcp add repl-mcp -- clojure -M:repl-mcp
-# Or for HTTP SSE transport
+# HTTP SSE transport
 claude mcp add --transport sse repl-mcp http://localhost:18080/sse
+# Or STDIO (can be too slow in startup for 30s timeout window)
+claude mcp add repl-mcp -- clojure -M:repl-mcp
 ```
 
 #### VS Code
@@ -100,86 +116,178 @@ TODO: Add other integration instructions here, please open a PR.
 (repl-mcp/stop-server!)   ; Stop server
 ```
 
-## Available Tools (51 Total)
+## Available Tools (53 Total)
 
-**Evaluation (2)**: `:eval`, `:load-file`  
-**Refactoring (11)**: `:clean-ns`, `:find-symbol`, `:rename-file-or-dir`, `:resolve-missing`, `:find-used-locals`, `:extract-function`, `:extract-variable`, `:add-function-parameter`, `:organize-imports`, `:inline-function`, `:rename-local-variable`  
-**Cider-nREPL (12)**: `:format-code`, `:macroexpand`, `:eldoc`, `:complete`, `:apropos`, `:test-all`, `:enhanced-info`, `:ns-list`, `:ns-vars`, `:classpath`, `:refresh`, `:test-var-query`  
-**Structural Editing (10)**: `:structural-create-session`, `:structural-save-session`, `:structural-close-session`, `:structural-get-info`, `:structural-list-sessions`, `:structural-find-symbol-enhanced`, `:structural-replace-node`, `:structural-bulk-find-and-replace`, `:structural-extract-to-let`, `:structural-thread-first`  
-**Function Refactoring (5)**: `:find-function-definition`, `:rename-function-in-file`, `:find-function-usages-in-project`, `:rename-function-across-project`, `:replace-function-definition`  
-**Test Generation (1)**: `:create-test-skeleton`  
-**Static Analysis (3)**: `:lint-code`, `:lint-project`, `:setup-clj-kondo`  
-**Dependency Management (3)**: `:add-libs`, `:sync-deps`, `:check-namespace`  
-**Advanced Navigation (2)**: `:call-hierarchy`, `:usage-finder`
+The MCP server provides 53 specialized tools organized into 9 categories for comprehensive Clojure development support:
 
-### Code Quality Tools
+### Evaluation (2 tools)
 
-The integrated clj-kondo static analysis provides:
+- **`:eval`** - Evaluate Clojure code in the connected nREPL session
+- **`:load-file`** - Load a Clojure file into the nREPL session
 
-- **`:lint-code`**: Lint code strings during interactive development
-  - Detects unused bindings, imports, and variables
-  - Syntax error validation with clear error messages
-  - Custom configuration support per invocation
-  
-- **`:lint-project`**: Analyze entire directories or projects
-  - Project-wide linting with parallel processing
-  - Respects existing `.clj-kondo/config.edn` configurations
-  - Comprehensive codebase quality assessment
-  
-- **`:setup-clj-kondo`**: Initialize or update project linting configuration
-  - Import library-specific linting rules from dependencies
-  - Update project cache for improved performance
-  - Safe configuration management (additive only)
+### Refactoring (11 tools)
 
-### Dependency Management Tools
+- **`:clean-ns`** - Clean and organize namespace declarations using refactor-nrepl
+- **`:find-symbol`** - Find all occurrences of a symbol in the codebase
+- **`:rename-file-or-dir`** - Rename a file or directory and update all references
+- **`:resolve-missing`** - Resolve missing or unresolved symbols
+- **`:find-used-locals`** - Find locally used variables at a specific location
+- **`:extract-function`** - Extract selected code into a new function
+- **`:extract-variable`** - Extract current expression into a let binding
+- **`:add-function-parameter`** - Add a parameter to a function definition
+- **`:organize-imports`** - Organize and clean up namespace imports
+- **`:inline-function`** - Inline a function call by replacing it with the function body
+- **`:rename-local-variable`** - Rename a local variable within its scope
 
-**Runtime dependency management using Clojure 1.12+ add-libs functionality:**
+### Cider-nREPL (12 tools)
 
-- **`:add-libs`**: Add new libraries to the running REPL classpath
-  - Supports Maven coordinates as EDN maps or strings
-  - Libraries are immediately available without REPL restart
-  - Useful for trying new libraries during interactive development
-  
-- **`:sync-deps`**: Synchronize dependencies from deps.edn
-  - Loads dependencies defined in deps.edn that aren't yet on classpath
-  - Automatically resolves and adds missing project dependencies
-  - Perfect for syncing after updating deps.edn
-  
-- **`:check-namespace`**: Verify namespace/library availability
-  - Check if a specific namespace is available on the classpath
-  - Useful for confirming library loading before attempting to use it
-  - Returns availability status and error details if not found
+- **`:format-code`** - Format Clojure code using cider-nrepl's format-code operation
+- **`:macroexpand`** - Expand Clojure macros using cider-nrepl's macroexpand operation
+- **`:eldoc`** - Get function documentation and signatures using cider-nrepl's eldoc operation
+- **`:complete`** - Get code completion candidates using cider-nrepl's complete operation
+- **`:apropos`** - Search for symbols matching a pattern using cider-nrepl's apropos operation
+- **`:test-all`** - Run all tests in the project using cider-nrepl's test-all operation
+- **`:enhanced-info`** - Get enhanced symbol information using cider-nrepl's info operation
+- **`:ns-list`** - Browse all available namespaces for rapid codebase exploration
+- **`:ns-vars`** - Explore namespace contents - get all vars in a namespace
+- **`:classpath`** - Understand available dependencies and classpath entries
+- **`:refresh`** - Safely refresh user namespaces without killing server infrastructure
+- **`:test-var-query`** - Run specific tests instead of all tests for rapid iteration
 
-**Requirements:**
-- Clojure 1.12+ (for add-libs functionality)
-- REPL context (only works within active nREPL session)
-- Maven-compatible dependencies (mvn/version coordinates)
+### Structural Editing (12 tools)
+Session-based structural editing using rewrite-clj zippers for precise code manipulation:
 
-### Advanced Navigation Tools
+#### Session Management
 
-**Semantic code navigation using refactor-nrepl and AST analysis:**
+- **`:structural-create-session`** - Create a new structural editing session from file or code string
+- **`:structural-save-session`** - Save structural editing session to file or get as string
+- **`:structural-close-session`** - Close a structural editing session
+- **`:structural-get-info`** - Get comprehensive information about current zipper position
+- **`:structural-list-sessions`** - List all active structural editing sessions
 
-- **`:call-hierarchy`**: Analyze function call relationships in your project
-  - Find all functions that call a specific function (callers analysis)
-  - Supports configurable depth traversal for comprehensive analysis
-  - Integrates with refactor-nrepl for accurate semantic information
-  - Handles both project namespaces and external dependencies intelligently
-  
-- **`:usage-finder`**: Find all usages of a symbol across the project
-  - Comprehensive symbol usage analysis with detailed context
-  - Categorizes usages by type (function calls, bindings, references)
-  - Provides file-level and project-level usage statistics
-  - Supports both local project symbols and external namespace symbols
+#### Code Navigation & Search
 
-**Features:**
-- **Semantic Analysis**: Uses refactor-nrepl's AST traversal for accurate results
-- **Context-Aware**: Distinguishes between different usage types and contexts
-- **Performance Optimized**: Efficient handling of large codebases with intelligent filtering
-- **Error Resilient**: Graceful handling of external namespaces and missing symbols
+- **`:structural-find-symbol-enhanced`** - Find symbols with enhanced matching including keywords and flexible patterns
 
-**Requirements:**
-- Active nREPL session with refactor-nrepl middleware
-- Project must be loaded in the nREPL for optimal symbol resolution
+#### Code Modification
+
+- **`:structural-replace-node`** - Replace current node with new expression
+- **`:structural-bulk-find-and-replace`** - Find and replace all occurrences of a pattern with enhanced symbol matching
+- **`:structural-extract-to-let`** - Extract current expression to a let binding
+- **`:structural-thread-first`** - Convert expression to thread-first macro
+- **`:structural-insert-after`** - Insert expression after current node with proper formatting
+- **`:structural-insert-before`** - Insert expression before current node with proper formatting
+
+**Structural Editing Workflow**: Create a session → Navigate/Search → Modify code → Save/Close session. All modifications are performed using rewrite-clj zippers for precise AST manipulation while preserving formatting.
+
+### Function Refactoring (5 tools)
+
+- **`:find-function-definition`** - Find the definition of a function in a file
+- **`:rename-function-in-file`** - Rename a function and all its invocations within a single file
+- **`:find-function-usages-in-project`** - Find all usages of a function across the entire project
+- **`:rename-function-across-project`** - Rename a function and all its usages across an entire project
+- **`:replace-function-definition`** - Replace an entire function definition with a new implementation
+
+### Test Generation (1 tool)
+
+- **`:create-test-skeleton`** - Generate a comprehensive test skeleton for a Clojure function with multiple test cases and documentation
+
+### Static Analysis (3 tools)
+
+- **`:lint-code`** - Lint Clojure code string for errors and style issues
+- **`:lint-project`** - Lint entire project or specific paths for errors and style issues
+- **`:setup-clj-kondo`** - Initialize or update clj-kondo configuration for the project
+
+### Dependency Management (3 tools)
+
+- **`:add-libs`** - Add libraries to the running REPL without restart (Clojure 1.12+)
+- **`:sync-deps`** - Sync dependencies from deps.edn that aren't yet on the classpath
+- **`:check-namespace`** - Check if a library/namespace is available on the classpath
+
+### Advanced Navigation (2 tools)
+
+- **`:call-hierarchy`** - Analyze function call hierarchy (callers) in a Clojure project
+- **`:usage-finder`** - Find all usages of a symbol across the project with detailed analysis
+
+### Profiling (2 tools)
+Performance analysis tools using clj-async-profiler for detailed profiling:
+
+- **`:profile-cpu`** - Profile CPU usage of Clojure code with comprehensive analysis
+- **`:profile-alloc`** - Profile memory allocation of Clojure code with comprehensive analysis
+
+**Profiling Requirements**: JVM must be started with profiling JVM options (see Quick Start section). Profiling tools require clj-async-profiler dependency.
+
+## Tool Usage Examples
+
+### Basic Evaluation
+```clojure
+;; Evaluate code in the current namespace
+eval: (+ 1 2 3)
+
+;; Evaluate in a specific namespace
+eval: (defn greet [name] (str "Hello, " name "!"))
+namespace: "my.app.core"
+```
+
+### Structural Editing Workflow
+```clojure
+;; 1. Create a session for a file
+structural-create-session: 
+  session-id: "edit-session-1"
+  source: "/path/to/file.clj"
+  from-file: true
+
+;; 2. Navigate to a symbol
+structural-find-symbol-enhanced:
+  session-id: "edit-session-1"
+  symbol-name: "my-function"
+
+;; 3. Replace the current node
+structural-replace-node:
+  session-id: "edit-session-1"
+  new-expression: "(defn my-function [x y] (+ x y))"
+
+;; 4. Save changes
+structural-save-session:
+  session-id: "edit-session-1"
+  file-path: "/path/to/file.clj"
+```
+
+### Function Refactoring
+```clojure
+;; Find function definition
+find-function-definition:
+  file-path: "/path/to/file.clj"
+  function-name: "calculate-total"
+
+;; Rename function across entire project
+rename-function-across-project:
+  project-root: "/path/to/project"
+  old-name: "calculate-total"
+  new-name: "compute-sum"
+```
+
+### Dependency Management
+```clojure
+;; Add a new library at runtime
+add-libs:
+  coordinates: {"hiccup/hiccup" {:mvn/version "1.0.5"}}
+
+;; Check if namespace is available
+check-namespace:
+  namespace: "hiccup.core"
+```
+
+### Code Quality
+```clojure
+;; Lint code string
+lint-code:
+  code: "(defn broken-fn [x] (if x x))"
+
+;; Lint entire project
+lint-project:
+  paths: ["src", "test"]
+```
 
 ## Development
 

@@ -7,21 +7,14 @@
             [clojure.string :as str])
   (:gen-class))
 
-;; Setup file-only logging immediately to avoid stdout contamination
-;; This must happen before any tool loading that might trigger logging
-(logging/setup-file-logging!)
-
-;; Now require tools AFTER logging is configured for file-only output
-(require '[is.simm.repl-mcp.tools.eval])
-(require '[is.simm.repl-mcp.tools.refactor])
-(require '[is.simm.repl-mcp.tools.structural-edit])
-(require '[is.simm.repl-mcp.tools.cider-nrepl])
-(require '[is.simm.repl-mcp.tools.function-refactor])
-(require '[is.simm.repl-mcp.tools.test-generation])
-(require '[is.simm.repl-mcp.tools.clj-kondo])
-(require '[is.simm.repl-mcp.tools.deps-management])
-(require '[is.simm.repl-mcp.tools.navigation])
-(require '[is.simm.repl-mcp.tools.performance])
+;; Utility function to require namespaces with error handling
+(defn try-require
+  "Attempt to require a namespace, logging any errors." 
+  [ns]
+  (try
+    (require ns)
+    (catch Exception e
+      (log/log! {:level :warn :msg (str "Failed to require " ns) :error (.getMessage e)}))))
 
 (defn get-prompt-args
   "Get argument definitions for specific prompts"
@@ -277,6 +270,22 @@
 
       :start
       (do
+        ;; Setup file-only logging immediately to avoid stdout contamination
+        ;; This must happen before any tool loading that might trigger logging
+        (logging/setup-file-logging! (contains? transports :stdio))
+
+        ;; Now require tools AFTER logging is configured for file-only output
+        (try-require '[is.simm.repl-mcp.tools.eval])
+        (try-require '[is.simm.repl-mcp.tools.refactor])
+        (try-require '[is.simm.repl-mcp.tools.structural-edit])
+        (try-require '[is.simm.repl-mcp.tools.cider-nrepl])
+        (try-require '[is.simm.repl-mcp.tools.function-refactor])
+        (try-require '[is.simm.repl-mcp.tools.test-generation])
+        (try-require '[is.simm.repl-mcp.tools.clj-kondo])
+        (try-require '[is.simm.repl-mcp.tools.deps-management])
+        (try-require '[is.simm.repl-mcp.tools.navigation])
+        (try-require '[is.simm.repl-mcp.tools.profiling])
+
         ;; Logging is already setup at namespace load time
         (start-server! :nrepl-port nrepl-port :transports transports)
 

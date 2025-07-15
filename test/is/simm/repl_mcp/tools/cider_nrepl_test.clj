@@ -1,8 +1,49 @@
 (ns is.simm.repl-mcp.tools.cider-nrepl-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [is.simm.repl-mcp.tools.cider-nrepl]
-            [is.simm.repl-mcp.dispatch :as dispatch]))
+            [is.simm.repl-mcp.dispatch :as dispatch]
+            [clojure.string :as str]
+            [nrepl.server :as nrepl-server]
+            [nrepl.core :as nrepl]
+            [cider.nrepl :refer [cider-nrepl-handler]]
+            [refactor-nrepl.middleware :refer [wrap-refactor]]))
 
+;; Real integration tests with nREPL server
+(def ^:dynamic *nrepl-server* nil)
+(def ^:dynamic *nrepl-client* nil)
+
+(defn start-test-nrepl-server!
+  "Start an nREPL server for testing and return [server client]"
+  []
+  (let [server (nrepl-server/start-server :port 0 :handler (wrap-refactor cider-nrepl-handler)) ; Use random available port with middleware
+        port (:port server)
+        conn (nrepl/connect :port port)
+        client (nrepl/client conn 1000)]  ; Create a client with timeout
+    [server client conn]))
+
+(defn stop-test-nrepl-server!
+  "Stop the test nREPL server and close client"
+  [server client conn]
+  (when server
+    (nrepl-server/stop-server server)
+    ;; Give server threads time to finish cleanup
+    (Thread/sleep 100))
+  (when client
+    (.close conn)))
+
+(defn with-test-nrepl
+  "Fixture that provides a live nREPL server for integration tests"
+  [test-fn]
+  (let [[server client conn] (start-test-nrepl-server!)]
+    (binding [*nrepl-server* server
+              *nrepl-client* client]
+      (try
+        (Thread/sleep 500) ; Give server a moment to fully start
+        (test-fn)
+        (finally
+          (stop-test-nrepl-server! server client conn))))))
+
+(use-fixtures :once with-test-nrepl)
 
 ;; Tests for cider-nrepl tools
 ;; These tests verify tool registration and basic functionality
@@ -164,5 +205,41 @@
         (when-let [handler (get-in registered-tools [:ns-list :handler])]
           (let [tool-call {:tool-name :ns-list :args {}}
                 context {:nrepl-client nil}]
-            ;; Should not throw an exception when called with proper parameters
-            (is (map? (handler tool-call context)))))))))
+            ;; Should return error map when nREPL client is nil
+            (let [result (handler tool-call context)]
+              (is (map? result))
+              (is (= (:status result) :error))
+              (is (contains? result :error))))))))
+
+(deftest cider-nrepl-integration-test
+  (testing "cider-nrepl tools work with real nREPL server"
+    (let [registered-tools (dispatch/get-registered-tools)]
+      (testing "ns-list with real nREPL client"
+        (when-let [handler (get-in registered-tools [:ns-list :handler])]
+          (let [tool-call {:tool-name :ns-list :args {}}
+                context {:nrepl-client *nrepl-client*}]
+            (let [result (handler tool-call context)]
+              (is (map? result))
+              (is (contains? result :status))
+              ;; Should succeed with real client
+              (when (= (:status result) :success)
+                (is (contains? result :value))
+                (is (string? (:value result)))
+                (is (str/includes? (:value result) "Found"))
+                (is (str/includes? (:value result) "namespaces")))))))
+      
+      (testing "ns-vars with real nREPL client"
+        (when-let [handler (get-in registered-tools [:ns-vars :handler])]
+          (let [tool-call {:tool-name :ns-vars :args {"ns" "user"}}
+                context {:nrepl-client *nrepl-client*}]
+            (let [result (handler tool-call context)]
+              (is (map? result))
+              (is (contains? result :status))))))
+      
+      (testing "format-code with real nREPL client"
+        (when-let [handler (get-in registered-tools [:format-code :handler])]
+          (let [tool-call {:tool-name :format-code :args {"code" "(+ 1 2)"}}
+                context {:nrepl-client *nrepl-client*}]
+            (let [result (handler tool-call context)]
+              (is (map? result))
+              (is (contains? result :status))))))))))

@@ -1,4 +1,4 @@
-(ns is.simm.repl-mcp.tools.performance
+(ns is.simm.repl-mcp.tools.profiling
   (:require [is.simm.repl-mcp.interactive :refer [register-tool!]]
             [nrepl.core :as nrepl]
             [taoensso.telemere :as log]

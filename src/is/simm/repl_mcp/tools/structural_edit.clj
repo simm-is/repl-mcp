@@ -59,8 +59,8 @@
 ;; CORE STRUCTURAL EDITING TOOLS
 ;; =============================================================================
 
-(register-tool! :structural-find-symbol-enhanced
-  "Find symbols with enhanced matching including keywords and flexible patterns"
+(register-tool! :structural-find-symbol
+  "Find symbols with matching including keywords and flexible patterns"
   {:session-id {:type "string" :description "Session identifier"}
    :symbol-name {:type "string" :description "Symbol name to find"}
    :exact-match {:type "boolean" :default false :optional true :description "Whether to use exact matching"}

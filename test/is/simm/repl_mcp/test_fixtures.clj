@@ -34,7 +34,9 @@
       ;; nREPL client doesn't have .close method, just let it be garbage collected
       (log/log! {:level :debug :msg "nREPL client connection closed"}))
     (when (:server nrepl-state)
-      (nrepl-server/stop-server (:server nrepl-state)))
+      (nrepl-server/stop-server (:server nrepl-state))
+      ;; Give server threads time to finish cleanup
+      (Thread/sleep 100))
     (log/log! {:level :info :msg "Test nREPL server stopped"})
     (catch Exception e
       (log/log! {:level :warn :msg "Error stopping test nREPL server" :data {:error (.getMessage e)}}))))

@@ -55,13 +55,13 @@
       (let [result (eval-tools/eval-code nil "(+ 1 2)" :namespace "user" :timeout 10000)]
         (is (= (:status result) :error))))))
 
-(deftest load-clojure-file-error-handling-test
-  (testing "file loading with nonexistent file handles errors gracefully"
-    ;; This will fail on file read, which tests our error handling
-    (let [result (eval-tools/load-clojure-file nil "/nonexistent/file.clj")]
+(deftest load-clojure-file-nil-client-test
+  (testing "load-clojure-file with nil client returns appropriate error"
+    (let [result (eval-tools/load-clojure-file nil "some-file.clj")]
       (is (= (:status result) :error))
       (is (some? (:error result)))
-      (is (str/includes? (:error result) "No such file")))))
+      (is (str/includes? (:error result) "nREPL client is nil")))))
+
 
 (deftest result-structure-test
   (testing "eval result structure contains expected keys"
@@ -88,10 +88,12 @@
 (defn stop-test-nrepl-server!
   "Stop the test nREPL server and close client"
   [server client conn]
-  (when client
-    (.close conn))
   (when server
-    (nrepl-server/stop-server server)))
+    (nrepl-server/stop-server server)
+    ;; Give server threads time to finish cleanup
+    (Thread/sleep 100))
+  (when client
+    (.close conn)))
 
 (defn with-test-nrepl
   "Fixture that provides a live nREPL server for integration tests"
@@ -171,7 +173,7 @@
         (is (str/includes? (:value result) "Alice"))
         (is (str/includes? (:value result) ":skills"))
         (is (str/includes? (:value result) ":meta"))
-        (is (string? (:value result))))))
+        (is (string? (:value result)))))))
 
 (deftest format-result-for-mcp-test
   (testing "format-result-for-mcp function"
@@ -212,5 +214,13 @@
         (is (str/includes? (:value result) ":names"))
         (is (str/includes? (:value result) ":jobs"))
         (is (str/includes? (:value result) "Alice"))
-        (is (str/includes? (:value result) "Engineer")))))))
+        (is (str/includes? (:value result) "Engineer"))))))
+
+(deftest load-clojure-file-error-handling-test
+  (testing "file loading with nonexistent file handles errors gracefully"
+    ;; Use real nREPL client to test actual file system errors
+    (let [result (eval-tools/load-clojure-file *nrepl-client* "/nonexistent/file.clj")]
+      (is (= (:status result) :error))
+      (is (some? (:error result)))
+      (is (str/includes? (:error result) "No such file")))))
 

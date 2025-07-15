@@ -4,12 +4,13 @@
 
 (defn setup-file-logging!
   "Configure Telemere with file logging and disable console output for STDIO transport"
-  []
+  [disable-console?]
   ;; Completely disable all logging temporarily during configuration
   (t/set-min-level! :fatal)
   
   ;; Remove all default handlers (including console)
-  (t/remove-handler! :default/console)
+  (when disable-console?
+    (t/remove-handler! :default/console))
   
   ;; Add ONLY file handler to Telemere with proper configuration
   (t/add-handler! 

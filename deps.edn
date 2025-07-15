@@ -15,11 +15,11 @@
                         "--enable-native-access=ALL-UNNAMED"]
              :extra-deps {nrepl/nrepl {:mvn/version "1.0.0"}
                           cider/cider-nrepl {:mvn/version "0.47.1"}
-                          rewrite-clj/rewrite-clj {:mvn/version "1.1.47"}
                           refactor-nrepl/refactor-nrepl {:mvn/version "3.10.0"}
+                          rewrite-clj/rewrite-clj {:mvn/version "1.1.47"}
                           dev.weavejester/cljfmt {:mvn/version "0.13.1"}
                           clj-kondo/clj-kondo {:mvn/version "2025.06.05"}
-                          ;; Performance analysis dependencies
+                          ;; Profiling dependencies (optional)
                           criterium/criterium {:mvn/version "0.4.6"}
                           com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.6.1"}
 

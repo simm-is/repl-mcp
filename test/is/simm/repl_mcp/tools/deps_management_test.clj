@@ -112,10 +112,12 @@
 (defn stop-test-nrepl-server!
   "Stop the test nREPL server and close client"
   [server client conn]
-  (when client
-    (.close conn))
   (when server
-    (nrepl-server/stop-server server)))
+    (nrepl-server/stop-server server)
+    ;; Give server threads time to finish cleanup
+    (Thread/sleep 100))
+  (when client
+    (.close conn)))
 
 (defn with-test-nrepl
   "Fixture that provides a live nREPL server for integration tests"

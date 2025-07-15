@@ -23,7 +23,7 @@
       (is (contains? registered-tools :structural-close-session))
       (is (contains? registered-tools :structural-get-info))
       (is (contains? registered-tools :structural-list-sessions))
-      (is (contains? registered-tools :structural-find-symbol-enhanced))
+      (is (contains? registered-tools :structural-find-symbol))
       (is (contains? registered-tools :structural-replace-node))
       (is (contains? registered-tools :structural-bulk-find-and-replace))
       (is (contains? registered-tools :structural-extract-to-let))
@@ -69,7 +69,7 @@
       (edit/close-session session-id))))
 
 (deftest find-symbol-functionality-test
-  (testing "Symbol finding with enhanced matching"
+  (testing "Symbol finding with  matching"
     (let [session-id "test-session-2"]
       (edit/create-session session-id function-test-code :from-file? false)
       
@@ -206,8 +206,8 @@
           (is (contains? (:parameters create-tool) :source))
           (is (fn? (:handler create-tool))))
         
-        (when-let [find-tool (:structural-find-symbol-enhanced registered-tools)]
-          (is (= (:name find-tool) :structural-find-symbol-enhanced))
+        (when-let [find-tool (:structural-find-symbol registered-tools)]
+          (is (= (:name find-tool) :structural-find-symbol))
           (is (string? (:description find-tool)))
           (is (contains? (:parameters find-tool) :session-id))
           (is (contains? (:parameters find-tool) :symbol-name))
