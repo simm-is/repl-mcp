@@ -58,7 +58,7 @@
       (is (contains? registered-tools :complete))
       (is (contains? registered-tools :apropos))
       (is (contains? registered-tools :test-all))
-      (is (contains? registered-tools :enhanced-info))
+      (is (contains? registered-tools :info))
       (is (contains? registered-tools :ns-list))
       (is (contains? registered-tools :ns-vars))
       (is (contains? registered-tools :classpath))
@@ -128,7 +128,7 @@
       
       (testing "Tool descriptions are non-empty strings"
         (doseq [tool-name [:format-code :macroexpand :eldoc :complete :apropos 
-                          :test-all :enhanced-info :ns-list :ns-vars :classpath 
+                          :test-all :info :ns-list :ns-vars :classpath 
                           :refresh :test-var-query]]
           (when-let [tool (get registered-tools tool-name)]
             (is (string? (:description tool)))
@@ -183,7 +183,7 @@
         (is (contains? registered-tools :test-all)))
       
       (testing "Code analysis tools"
-        (is (contains? registered-tools :enhanced-info))
+        (is (contains? registered-tools :info))
         (is (contains? registered-tools :eldoc))
         (is (contains? registered-tools :complete))
         (is (contains? registered-tools :apropos))
@@ -196,7 +196,7 @@
       
       (testing "All tool handlers are functions"
         (doseq [tool-name [:format-code :macroexpand :eldoc :complete :apropos 
-                          :test-all :enhanced-info :ns-list :ns-vars :classpath 
+                          :test-all :info :ns-list :ns-vars :classpath 
                           :refresh :test-var-query]]
           (when-let [handler (get-in registered-tools [tool-name :handler])]
             (is (fn? handler)))))

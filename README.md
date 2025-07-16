@@ -147,7 +147,7 @@ The MCP server provides 53 specialized tools organized into 9 categories for com
 - **`:complete`** - Get code completion candidates using cider-nrepl's complete operation
 - **`:apropos`** - Search for symbols matching a pattern using cider-nrepl's apropos operation
 - **`:test-all`** - Run all tests in the project using cider-nrepl's test-all operation
-- **`:enhanced-info`** - Get enhanced symbol information using cider-nrepl's info operation
+- **`:info`** - Get enhanced symbol information using cider-nrepl's info operation
 - **`:ns-list`** - Browse all available namespaces for rapid codebase exploration
 - **`:ns-vars`** - Explore namespace contents - get all vars in a namespace
 - **`:classpath`** - Understand available dependencies and classpath entries

@@ -133,7 +133,7 @@
           {:error (.getMessage e) :status :error})))))
 
 ;; Enhanced info tool (better than current one)
-(register-tool! :enhanced-info
+(register-tool! :info
   "Get enhanced symbol information using cider-nrepl's info operation"
   {:symbol {:type "string" :description "Symbol to get info for"}
    :ns {:type "string" :optional true :description "Namespace context (defaults to 'user')"}}

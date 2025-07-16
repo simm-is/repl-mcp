@@ -118,6 +118,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Project must be loaded in the nREPL for optimal symbol resolution
 - Works best with project namespaces (external namespace support is limited)
 
+### Performance Analysis Workflow
+
+**Critical Rule: Always warm up JIT with criterium before profiling CPU-bound code**
+
+**Workflow:**
+1. **JIT Warmup**: Use `(criterium.core/quick-bench my-function)` first
+2. **Profile**: Then use `profile-cpu` or `profile-alloc` for representative results
+
+**Tools:**
+- **`eval`**: 2-minute timeout allows criterium to complete warmup cycles
+- **`profile-cpu`**: CPU profiling with `:duration` parameter (default 5000ms)  
+- **`profile-alloc`**: Memory allocation profiling with `:duration` parameter
+- **Criterium**: Statistical benchmarking via eval tool
+
+**Example:**
+```clojure
+;; 1. Warm up JIT first
+(criterium.core/quick-bench (compute-heavy-function data))
+;; 2. Now profile for accurate results with the MCP tool similar to: 
+(profile-cpu "(compute-heavy-function data)" :duration 5000)
+```
+
 ## Commands
 
 ### Development Commands
