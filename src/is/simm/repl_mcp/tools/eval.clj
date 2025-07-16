@@ -1,6 +1,5 @@
 (ns is.simm.repl-mcp.tools.eval
   (:require [is.simm.repl-mcp.interactive :refer [register-tool!]]
-            [is.simm.repl-mcp.logging :as logging]
             [nrepl.core :as nrepl]
             [taoensso.telemere :as log]))
 
@@ -17,56 +16,81 @@
       result-str)))
 
 (defn eval-code
-  "Evaluate Clojure code using nREPL client. Returns result map with :value, :output, :error, :status."
+  "Evaluate Clojure code using nREPL client with proper timeout and interrupt handling. 
+   Returns result map with :value, :output, :error, :status."
   [nrepl-client code & {:keys [namespace timeout]
-                                      :or {timeout 5000}}]
+                                      :or {timeout 120000}}]
   (try
-    (log/log! {:level :info :msg "Starting eval" :data {:code code :namespace namespace :timeout timeout}})
     (when (nil? nrepl-client)
       (throw (Exception. "nREPL client is nil")))
-    (let [;; Create a session if needed
-          clone-msg {:op "clone"}
-          _ (log/log! {:level :debug :msg "Sending clone message" :data {:clone-msg clone-msg}})
-          session-responses (nrepl/message nrepl-client clone-msg)
-          _ (log/log! {:level :debug :msg "Clone responses" :data {:session-responses session-responses}})
-          session-id (-> session-responses first :new-session)
-          _ (log/log! {:level :debug :msg "Session created" :data {:session-id session-id}})
-          eval-msg (cond-> {:op "eval" :code code :session session-id}
-                     namespace (assoc :ns namespace)
-                     timeout (assoc :timeout timeout))
-          _ (log/log! {:level :debug :msg "Sending eval message" :data {:eval-msg eval-msg}})
+    
+    (let [;; Prepare eval message - use existing session if available, otherwise create one
+          eval-msg (cond-> {:op "eval" :code code}
+                     namespace (assoc :ns namespace))
           
-          responses (doall (nrepl/message nrepl-client eval-msg))
-          _ (log/log! {:level :debug :msg "Raw nREPL responses" :data {:responses responses :response-count (count responses)}})
+          ;; Set up timeout handling with interrupt
+          response-future (future 
+                            (try
+                              (doall (nrepl/message nrepl-client eval-msg))
+                              (catch Exception _
+                                ::eval-error)))
           
-          ;; Use response-values as intended by nREPL
-          values (nrepl/response-values responses)
-          _ (log/log! {:level :debug :msg "nREPL values" :data {:values values}})
+          ;; Wait for response with timeout
+          responses (deref response-future timeout ::timeout)]
+      
+      (cond
+        ;; Handle timeout - send interrupt if we have a session
+        (= responses ::timeout)
+        (do
+          ;; Try to send interrupt - we'll need to get the session from the client
+          (try
+            (let [clone-result (first (nrepl/message nrepl-client {:op "clone"}))
+                  session-id (:new-session clone-result)]
+              (when session-id
+                (future (nrepl/message nrepl-client {:op "interrupt" :session session-id}))))
+            (catch Exception _)) ; Ignore interrupt failures
           
-          combined (nrepl/combine-responses responses)
-          _ (log/log! {:level :debug :msg "nREPL combined" :data {:combined combined}})
+          ;; Cancel the future
+          (future-cancel response-future)
           
-          result (cond
-                   (:err combined) (let [output (:out combined)
-                                        error-msg (:err combined)
-                                        combined-error (if (seq output)
-                                                        (str error-msg "\nOutput: " output)
-                                                        error-msg)]
-                                    {:error combined-error
-                                     :status :error})
-                   :else (let [eval-result (format-result-for-mcp (first values) namespace)
-                              output (:out combined)
-                              combined-value (if (seq output)
-                                              (str eval-result "\nOutput: " output)
-                                              eval-result)]
-                          {:value combined-value
-                           :status :success}))]
-      (log/log! {:level :info :msg "Eval completed" :data {:code code :result result}})
-      (logging/log-eval-call code namespace timeout result)
-      result)
+          {:error (str "Operation timed out after " timeout "ms")
+           :status :timeout})
+        
+        ;; Handle eval error
+        (= responses ::eval-error)
+        {:error "Error occurred during nREPL evaluation"
+         :status :error}
+        
+        ;; Handle success - process responses normally
+        :else
+        (if (or (nil? responses) (empty? responses))
+          {:error "No response received from nREPL"
+           :status :error}
+          
+          ;; Process successful responses
+          (let [values (nrepl/response-values responses)
+                combined (nrepl/combine-responses responses)]
+            
+            (cond
+              (:err combined) 
+              (let [output (:out combined)
+                    error-msg (:err combined)
+                    combined-error (if (seq output)
+                                    (str error-msg "\nOutput: " output)
+                                    error-msg)]
+                {:error combined-error
+                 :status :error})
+              
+              :else 
+              (let [eval-result (format-result-for-mcp (first values) namespace)
+                    output (:out combined)
+                    combined-value (if (seq output)
+                                    (str eval-result "\nOutput: " output)
+                                    eval-result)]
+                {:value combined-value
+                 :status :success}))))))
+    
     (catch Exception e
-      (log/log! {:level :error :msg "Error evaluating code" :data {:error (.getMessage e) :code code}})
-      (logging/log-error "Eval failed" e {:code code :namespace namespace})
       {:error (.getMessage e)
        :status :error})))
 
@@ -93,7 +117,7 @@
           (log/log! {:level :error :msg "Code is nil!" :data {:args (:args tool-call)}}))
         (when (nil? nrepl-client)
           (log/log! {:level :error :msg "nREPL client is nil!" :data {:context context}}))
-        (let [result (eval-code nrepl-client code :namespace namespace :timeout (or timeout 5000))]
+        (let [result (eval-code nrepl-client code :namespace namespace :timeout (or timeout 120000))]
           (log/log! {:level :info :msg "Eval tool result" :data {:result result}})
           result))
       (catch Exception e

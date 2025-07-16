@@ -37,7 +37,7 @@
 (defn connect-to-nrepl
   "Connect to nREPL server and return client"
   [port]
-  (let [client (nrepl/client (nrepl/connect :port port) 1000)]
+  (let [client (nrepl/client (nrepl/connect :port port) Long/MAX_VALUE)]
     (log/log! {:level :info :msg "Connected to nREPL server" :data {:port port}})
     client))
 
