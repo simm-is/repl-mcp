@@ -67,9 +67,9 @@
 
 (defn start-server!
   "Start the MCP server with transport configuration"
-  [& {:keys [nrepl-port transports] :or {nrepl-port 17888 transports #{:stdio}}}]
-  (log/log! {:level :info :msg "Starting repl-mcp server" :data {:nrepl-port nrepl-port :transports transports}})
-  (server/start-mcp-server! :nrepl-port nrepl-port :transports transports))
+  [& {:keys [nrepl-port http-port transports] :or {nrepl-port 17888 http-port 18080 transports #{:stdio}}}]
+  (log/log! {:level :info :msg "Starting repl-mcp server" :data {:nrepl-port nrepl-port :http-port http-port :transports transports}})
+  (server/start-mcp-server! :nrepl-port nrepl-port :http-port http-port :transports transports))
 
 (defn stop-server!
   "Stop the MCP server"
@@ -113,7 +113,7 @@
   "Parse command line arguments"
   [args]
   (let [parsed-args (loop [remaining args
-                          opts {:nrepl-port nil :transports #{:stdio} :command :start}]
+                          opts {:nrepl-port nil :http-port nil :transports #{:stdio} :command :start}]
                      (if (empty? remaining)
                        opts
                        (let [arg (first remaining)
@@ -124,6 +124,12 @@
                            (if (and (seq rest-args) (re-matches #"\d+" (first rest-args)))
                              (recur (rest rest-args) (assoc opts :nrepl-port (Integer/parseInt (first rest-args))))
                              (recur rest-args (assoc opts :nrepl-port-missing-value true)))
+                           
+                           ;; HTTP port flag
+                           (= arg "--http-port")
+                           (if (and (seq rest-args) (re-matches #"\d+" (first rest-args)))
+                             (recur (rest rest-args) (assoc opts :http-port (Integer/parseInt (first rest-args))))
+                             (recur rest-args (assoc opts :http-port-missing-value true)))
                            
                            ;; Transport options
                            (= arg "--stdio-only")
@@ -165,8 +171,9 @@
   (println)
   (println "Server Options:")
   (println "  --nrepl-port NUM Start nREPL server on specific port (default: 17888)")
+  (println "  --http-port NUM  Start HTTP+SSE transport on specific port (default: 18080)")
   (println "  --stdio-only     Start with STDIO transport only (default)")
-  (println "  --http-only      Start with HTTP+SSE transport only (port 18080)")
+  (println "  --http-only      Start with HTTP+SSE transport only")
   (println "  --dual-transport Start with both STDIO and HTTP+SSE transports")
   (println)
   (println "Introspection Options:")
@@ -178,6 +185,7 @@
   (println "Examples:")
   (println "  clojure -M:run                         # Start with STDIO transport")
   (println "  clojure -M:run --http-only              # Start with HTTP transport only")
+  (println "  clojure -M:run --http-port 8080         # HTTP transport on custom port")
   (println "  clojure -M:run --nrepl-port 7890 --dual-transport  # Custom nREPL port with both transports")
   (println "  clojure -M:run --list-tools             # List all available tools")
   (println "  clojure -M:run --tool-help eval         # Show help for eval tool"))
@@ -226,13 +234,19 @@
     
   See --help for full usage information."
   [& args]
-  (let [{:keys [command nrepl-port transports tool-name nrepl-port-missing-value]} (parse-args args)
-        nrepl-port (or nrepl-port 17888)]
+  (let [{:keys [command nrepl-port http-port transports tool-name nrepl-port-missing-value http-port-missing-value]} (parse-args args)
+        nrepl-port (or nrepl-port 17888)
+        http-port (or http-port 18080)]
     
     ;; Check for argument parsing errors
     (when nrepl-port-missing-value
       (println "Error: --nrepl-port requires a numeric value")
       (println "Usage: clojure -M:run --nrepl-port PORT")
+      (System/exit 1))
+    
+    (when http-port-missing-value
+      (println "Error: --http-port requires a numeric value")
+      (println "Usage: clojure -M:run --http-port PORT")
       (System/exit 1))
     
     (case command
@@ -287,7 +301,7 @@
         (try-require '[is.simm.repl-mcp.tools.profiling])
 
         ;; Logging is already setup at namespace load time
-        (start-server! :nrepl-port nrepl-port :transports transports)
+        (start-server! :nrepl-port nrepl-port :http-port http-port :transports transports)
 
         ;; Do not print to stdout when using STDIO transport - 
         ;; stdout is reserved for JSON-RPC messages only

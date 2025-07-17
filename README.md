@@ -59,26 +59,34 @@ Also make sure to provide the `Instructions` section from `CLAUDE.md` to your as
 ### Start the MCP Server
 
 ```bash
-# HTTP SSE transport (better to keep running in the background)
-clojure -M:repl-mcp --nrepl-port 27889 --http-only 
-# STDIO (default)
+# HTTP SSE transport (recommended for production use)
+clojure -M:repl-mcp --http-only --http-port 8080
+# With custom nREPL port to avoid conflicts
+clojure -M:repl-mcp --nrepl-port 27889 --http-port 8080 --http-only 
+# STDIO (default, good for development)
 clojure -M:repl-mcp
 ```
 
 This starts:
-- **nREPL server** on localhost:17888 (for coding operations on your project, you can also connect to it)
+- **nREPL server** on localhost:17888 (default) or custom port (for coding operations on your project)
 - **STDIO transport** for MCP communication via stdin/stdout (for local tools) 
-- **HTTP+SSE server** on localhost:18080 (for web-based MCP clients)
 
 ### Assistant Integration
 
 #### Claude Code
 
 ```bash
-# HTTP SSE transport
+# HTTP SSE transport (recommended - specify a unique port for each project)
 claude mcp add --transport sse repl-mcp http://localhost:18080/sse
 # Or STDIO (can be too slow in startup for 30s timeout window)
 claude mcp add repl-mcp -- clojure -M:repl-mcp
+```
+
+**Important**: When using HTTP SSE transport, specify a unique port for each project to avoid conflicts. Use `--http-port` when starting the server:
+
+```bash
+# Start server with custom HTTP port
+clojure -M:repl-mcp --http-only --http-port 8080
 ```
 
 #### VS Code
@@ -93,13 +101,16 @@ You can manually add it through the UI, or add `.vscode/mcp.json` like this to y
 			"command": "clojure",
 			"args": [
 				"-M:repl-mcp",
-				"--nrepl-port 37888"
+				"--nrepl-port 37888",
+				"--http-port 18080"
 			]
 		}
 	},
 	"inputs": []
 }
 ```
+
+**Note**: Specify unique ports for both nREPL and HTTP to avoid conflicts when running multiple projects simultaneously.
 
 TODO: Add other integration instructions here, please open a PR.
 
