@@ -17,6 +17,7 @@
 
 (defn eval-code
   "Evaluate Clojure code using nREPL client with proper timeout and interrupt handling. 
+   Creates a dedicated session per evaluation for complete isolation.
    Returns result map with :value, :output, :error, :status."
   [nrepl-client code & {:keys [namespace timeout]
                                       :or {timeout 120000}}]
@@ -24,75 +25,85 @@
     (when (nil? nrepl-client)
       (throw (Exception. "nREPL client is nil")))
     
-    (let [;; Prepare eval message - use existing session if available, otherwise create one
-          eval-msg (cond-> {:op "eval" :code code}
-                     namespace (assoc :ns namespace))
-          
-          ;; Set up timeout handling with interrupt
-          response-future (future 
-                            (try
-                              (doall (nrepl/message nrepl-client eval-msg))
-                              (catch Exception _
-                                ::eval-error)))
-          
-          ;; Wait for response with timeout
-          responses (deref response-future timeout ::timeout)]
+    ;; Create a dedicated session for this evaluation
+    (let [clone-result (first (nrepl/message nrepl-client {:op "clone"}))
+          session-id (:new-session clone-result)]
       
-      (cond
-        ;; Handle timeout - send interrupt if we have a session
-        (= responses ::timeout)
-        (do
-          ;; Try to send interrupt - we'll need to get the session from the client
-          (try
-            (let [clone-result (first (nrepl/message nrepl-client {:op "clone"}))
-                  session-id (:new-session clone-result)]
-              (when session-id
-                (future (nrepl/message nrepl-client {:op "interrupt" :session session-id}))))
-            (catch Exception _)) ; Ignore interrupt failures
-          
-          ;; Cancel the future
-          (future-cancel response-future)
-          
-          {:error (str "Operation timed out after " timeout "ms")
-           :status :timeout})
-        
-        ;; Handle eval error
-        (= responses ::eval-error)
-        {:error "Error occurred during nREPL evaluation"
-         :status :error}
-        
-        ;; Handle success - process responses normally
-        :else
-        (if (or (nil? responses) (empty? responses))
-          {:error "No response received from nREPL"
-           :status :error}
-          
-          ;; Process successful responses
-          (let [values (nrepl/response-values responses)
-                combined (nrepl/combine-responses responses)]
-            
-            (cond
-              (:err combined) 
-              (let [output (:out combined)
-                    error-msg (:err combined)
-                    combined-error (if (seq output)
-                                    (str error-msg "\nOutput: " output)
-                                    error-msg)]
-                {:error combined-error
-                 :status :error})
-              
-              :else 
-              (let [eval-result (format-result-for-mcp (first values) namespace)
-                    output (:out combined)
-                    combined-value (if (seq output)
-                                    (str eval-result "\nOutput: " output)
-                                    eval-result)]
-                {:value combined-value
-                 :status :success}))))))
-    
-    (catch Exception e
-      {:error (.getMessage e)
-       :status :error})))
+      (when-not session-id
+        (throw (Exception. "Failed to create nREPL session")))
+      
+      (try
+        ;; Prepare eval message with dedicated session
+        (let [eval-msg (cond-> {:op "eval" :code code :session session-id}
+                         namespace (assoc :ns namespace))
+
+              ;; Set up timeout handling with interrupt
+              response-future (future
+                                (try
+                                  (doall (nrepl/message nrepl-client eval-msg))
+                                  (catch Exception _
+                                    ::eval-error)))
+
+              ;; Wait for response with timeout
+              responses (deref response-future timeout ::timeout)]
+
+          (cond
+            ;; Handle timeout - send interrupt to our session
+            (= responses ::timeout)
+            (do
+              ;; Try to send interrupt to our dedicated session
+              (try
+                (future (nrepl/message nrepl-client {:op "interrupt" :session session-id}))
+                (catch Exception _)) ; Ignore interrupt failures
+
+              ;; Cancel the future
+              (future-cancel response-future)
+
+              {:error (str "Operation timed out after " timeout "ms")
+               :status :timeout})
+
+            ;; Handle eval error
+            (= responses ::eval-error)
+            {:error "Error occurred during nREPL evaluation"
+             :status :error}
+
+            ;; Handle success - process responses normally
+            :else
+            (if (or (nil? responses) (empty? responses))
+              {:error "No response received from nREPL"
+               :status :error}
+
+              ;; Process successful responses
+              (let [values (nrepl/response-values responses)
+                    combined (nrepl/combine-responses responses)]
+
+                (cond
+                  (:err combined)
+                  (let [output (:out combined)
+                        error-msg (:err combined)
+                        combined-error (if (seq output)
+                                         (str error-msg "\nOutput: " output)
+                                         error-msg)]
+                    {:error combined-error
+                     :status :error})
+
+                  :else
+                  (let [eval-result (format-result-for-mcp (first values) namespace)
+                        output (:out combined)
+                        combined-value (if (seq output)
+                                         (str eval-result "\nOutput: " output)
+                                         eval-result)]
+                    {:value combined-value
+                     :status :success}))))))
+            (catch Exception e
+              {:error (.getMessage e)
+               :status :error})
+            ;; Always close the session to prevent accumulation
+            (finally
+              (try
+                (nrepl/message nrepl-client {:op "close" :session session-id})
+                (catch Exception _))) ; Ignore close failures
+    ))))
 
 ;; MCP Tool Registration
 
