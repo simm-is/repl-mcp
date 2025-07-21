@@ -1,19 +1,22 @@
 (ns is.simm.repl-mcp.integration.minimal-roundtrip-test
   "Minimal roundtrip test demonstrating mcp-toolkit server compatibility"
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             [is.simm.repl-mcp.server :as server]
             [is.simm.repl-mcp.tools :as tools]
+            [is.simm.repl-mcp.test-fixtures :as fixtures]
             [taoensso.telemere :as log]))
+
+(use-fixtures :once fixtures/nrepl-fixture)
 
 (deftest test-instance-tool-roundtrip
   "Test complete tool roundtrip using simplified instance API"
   (testing "Instance creation, tool addition, and execution cycle"
     
-    ;; Create an MCP server instance
+    ;; Create an MCP server instance using test nREPL port
     (let [instance (server/create-mcp-server-instance! 
                      {:tools (tools/get-tool-definitions)
-                      :nrepl-config {:port 17888}
+                      :nrepl-config (fixtures/create-test-nrepl-config)
                       :server-info {:name "test-repl-mcp" :version "1.0.0"}})]
       
       ;; Add a test tool
@@ -113,10 +116,10 @@
   "Test error handling through tool execution"
   (testing "Error response and recovery cycle"
     
-    ;; Create instance and add error-generating tool
+    ;; Create instance and add error-generating tool using test nREPL port
     (let [instance (server/create-mcp-server-instance!
                      {:tools (tools/get-tool-definitions)
-                      :nrepl-config {:port 17888}
+                      :nrepl-config (fixtures/create-test-nrepl-config)
                       :server-info {:name "error-test" :version "1.0.0"}})
           error-tool {:name "error-protocol-test"
                       :description "Tool to test error handling"
