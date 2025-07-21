@@ -17,36 +17,35 @@
   (try
     (log/log! {:level :info :msg "Cleaning namespace in file" :data {:file-path file-path}})
     
-    (when (nil? nrepl-client)
-      (throw (Exception. "nREPL client is nil")))
-    
-    (let [responses (nrepl/message nrepl-client 
-                                  {:op "clean-ns" 
-                                   :path file-path
-                                   :prune-ns-form (boolean prune-unused)
-                                   :prefix-rewriting (boolean prefer-prefix)})
-          result (reduce (fn [acc response]
-                          (cond
-                            (:ns response) (assoc acc :cleaned-ns (str (:ns response)))
-                            (:err response) (assoc acc :error (:err response))
-                            (:out response) (update acc :output (fnil str "") (:out response))
-                            :else acc))
-                        {} responses)]
-      (if (:error result)
-        (let [error-msg (:error result)
-              output (:output result)
-              combined-error (if (seq output)
-                              (str error-msg "\nOutput: " output)
-                              error-msg)]
-          {:error combined-error
-           :status :error})
-        (let [cleaned-ns (str (:cleaned-ns result))
-              output (str (:output result))
-              combined-value (if (and output (seq output))
-                              (str "Cleaned namespace: " file-path "\nResult: " cleaned-ns "\nOutput: " output)
-                              (str "Cleaned namespace: " file-path "\nResult: " cleaned-ns))]
-          {:value combined-value
-           :status :success})))
+    (if (nil? nrepl-client)
+      {:status :error :error "nREPL client is nil"}
+      (let [responses (nrepl/message nrepl-client 
+                                    {:op "clean-ns" 
+                                     :path file-path
+                                     :prune-ns-form (boolean prune-unused)
+                                     :prefix-rewriting (boolean prefer-prefix)})
+            result (reduce (fn [acc response]
+                            (cond
+                              (:ns response) (assoc acc :cleaned-ns (str (:ns response)))
+                              (:err response) (assoc acc :error (:err response))
+                              (:out response) (update acc :output (fnil str "") (:out response))
+                              :else acc))
+                          {} responses)]
+        (if (:error result)
+          (let [error-msg (:error result)
+                output (:output result)
+                combined-error (if (seq output)
+                                (str error-msg "\nOutput: " output)
+                                error-msg)]
+            {:error combined-error
+             :status :error})
+          (let [cleaned-ns (str (:cleaned-ns result))
+                output (str (:output result))
+                combined-value (if (and output (seq output))
+                                (str "Cleaned namespace: " file-path "\nResult: " cleaned-ns "\nOutput: " output)
+                                (str "Cleaned namespace: " file-path "\nResult: " cleaned-ns))]
+            {:value combined-value
+             :status :success}))))
     (catch Exception e
       (log/log! {:level :error :msg "Error cleaning namespace" :data {:error (.getMessage e)}})
       {:error (.getMessage e)
@@ -58,24 +57,23 @@
   (try
     (log/log! {:level :info :msg "Finding symbol" :data {:file-path file-path :line line :column column}})
     
-    (when (nil? nrepl-client)
-      (throw (Exception. "nREPL client is nil")))
-    
-    (let [responses (nrepl/message nrepl-client 
-                                  {:op "find-symbol" 
-                                   :file file-path
-                                   :line line
-                                   :column column})
-          occurrences (atom [])]
-      (doseq [response responses]
-        (when (:occurrence response)
-          (swap! occurrences conj (:occurrence response))))
-      
-      {:occurrences @occurrences
-       :file-path file-path
-       :line line
-       :column column
-       :status :success})
+    (if (nil? nrepl-client)
+      {:status :error :error "nREPL client is nil"}
+      (let [responses (nrepl/message nrepl-client 
+                                    {:op "find-symbol" 
+                                     :file file-path
+                                     :line line
+                                     :column column})
+            occurrences (atom [])]
+        (doseq [response responses]
+          (when (:occurrence response)
+            (swap! occurrences conj (:occurrence response))))
+        
+        {:occurrences @occurrences
+         :file-path file-path
+         :line line
+         :column column
+         :status :success}))
     (catch Exception e
       (log/log! {:level :error :msg "Error finding symbol" :data {:error (.getMessage e)}})
       {:error (.getMessage e)
@@ -87,39 +85,39 @@
   (try
     (log/log! {:level :info :msg "Renaming file/directory" :data {:old-path old-path :new-path new-path}})
     
-    (when (nil? nrepl-client)
-      (throw (Exception. "nREPL client is nil")))
-    
-    ;; Validate that the source file exists
-    (when-not (.exists (java.io.File. old-path))
-      (throw (Exception. (str "Source file does not exist: " old-path))))
-    
-    (let [responses (nrepl/message nrepl-client 
-                                  {:op "rename-file-or-dir" 
-                                   :old-path old-path
-                                   :new-path new-path})
-          result (reduce (fn [acc response]
-                          (cond
-                            (:touched response) (assoc acc :touched (:touched response))
-                            (:err response) (assoc acc :error (:err response))
-                            (:out response) (update acc :output (fnil str "") (:out response))
-                            :else acc))
-                        {} responses)]
-      (if (:error result)
-        (let [error-msg (:error result)
-              output (:output result)
-              combined-error (if (seq output)
-                              (str error-msg "\nOutput: " output)
-                              error-msg)]
-          {:error combined-error
-           :status :error})
-        (let [touched (:touched result)
-              output (:output result)
-              combined-value (if (seq output)
-                              (str "Renamed " old-path " to " new-path "\nTouched files: " touched "\nOutput: " output)
-                              (str "Renamed " old-path " to " new-path "\nTouched files: " touched))]
-          {:value combined-value
-           :status :success})))
+    (if (nil? nrepl-client)
+      {:status :error :error "nREPL client is nil"}
+      (do
+        ;; Validate that the source file exists
+        (when-not (.exists (java.io.File. old-path))
+          (throw (Exception. (str "Source file does not exist: " old-path))))
+        
+        (let [responses (nrepl/message nrepl-client 
+                                      {:op "rename-file-or-dir" 
+                                       :old-path old-path
+                                       :new-path new-path})
+              result (reduce (fn [acc response]
+                              (cond
+                                (:touched response) (assoc acc :touched (:touched response))
+                                (:err response) (assoc acc :error (:err response))
+                                (:out response) (update acc :output (fnil str "") (:out response))
+                                :else acc))
+                            {} responses)]
+          (if (:error result)
+            (let [error-msg (:error result)
+                  output (:output result)
+                  combined-error (if (seq output)
+                                  (str error-msg "\nOutput: " output)
+                                  error-msg)]
+              {:error combined-error
+               :status :error})
+            (let [touched (:touched result)
+                  output (:output result)
+                  combined-value (if (seq output)
+                                  (str "Renamed " old-path " to " new-path "\nTouched files: " touched "\nOutput: " output)
+                                  (str "Renamed " old-path " to " new-path "\nTouched files: " touched))]
+              {:value combined-value
+               :status :success})))))
     (catch Exception e
       (log/log! {:level :error :msg "Error renaming file or directory" :data {:error (.getMessage e)}})
       {:error (.getMessage e)
@@ -131,35 +129,34 @@
   (try
     (log/log! {:level :info :msg "Resolving missing symbol" :data {:symbol symbol :namespace namespace}})
     
-    (when (nil? nrepl-client)
-      (throw (Exception. "nREPL client is nil")))
-    
-    (let [responses (nrepl/message nrepl-client 
-                                  {:op "resolve-missing" 
-                                   :symbol symbol
-                                   :ns namespace})
-          result (reduce (fn [acc response]
-                          (cond
-                            (:candidates response) (assoc acc :candidates (:candidates response))
-                            (:err response) (assoc acc :error (:err response))
-                            (:out response) (update acc :output (fnil str "") (:out response))
-                            :else acc))
-                        {} responses)]
-      (if (:error result)
-        (let [error-msg (:error result)
-              output (:output result)
-              combined-error (if (seq output)
-                              (str error-msg "\nOutput: " output)
-                              error-msg)]
-          {:error combined-error
-           :status :error})
-        (let [candidates (:candidates result)
-              output (:output result)
-              combined-value (if (seq output)
-                              (str "Resolved " namespace "/" symbol "\nCandidates: " candidates "\nOutput: " output)
-                              (str "Resolved " namespace "/" symbol "\nCandidates: " candidates))]
-          {:value combined-value
-           :status :success})))
+    (if (nil? nrepl-client)
+      {:status :error :error "nREPL client is nil"}
+      (let [responses (nrepl/message nrepl-client 
+                                    {:op "resolve-missing" 
+                                     :symbol symbol
+                                     :ns namespace})
+            result (reduce (fn [acc response]
+                            (cond
+                              (:candidates response) (assoc acc :candidates (:candidates response))
+                              (:err response) (assoc acc :error (:err response))
+                              (:out response) (update acc :output (fnil str "") (:out response))
+                              :else acc))
+                          {} responses)]
+        (if (:error result)
+          (let [error-msg (:error result)
+                output (:output result)
+                combined-error (if (seq output)
+                                (str error-msg "\nOutput: " output)
+                                error-msg)]
+            {:error combined-error
+             :status :error})
+          (let [candidates (:candidates result)
+                output (:output result)
+                combined-value (if (seq output)
+                                (str "Resolved " namespace "/" symbol "\nCandidates: " candidates "\nOutput: " output)
+                                (str "Resolved " namespace "/" symbol "\nCandidates: " candidates))]
+            {:value combined-value
+             :status :success}))))
     (catch Exception e
       (log/log! {:level :error :msg "Error resolving missing symbol" :data {:error (.getMessage e)}})
       {:error (.getMessage e)
@@ -171,40 +168,40 @@
   (try
     (log/log! {:level :info :msg "Finding used locals" :data {:file-path file-path :line line :column column}})
     
-    (when (nil? nrepl-client)
-      (throw (Exception. "nREPL client is nil")))
-    
-    ;; Validate that the file exists
-    (when-not (.exists (java.io.File. file-path))
-      (throw (Exception. (str "File does not exist: " file-path))))
-    
-    (let [responses (nrepl/message nrepl-client 
-                                  {:op "find-used-locals" 
-                                   :file file-path
-                                   :line line
-                                   :column column})
-          result (reduce (fn [acc response]
-                          (cond
-                            (:used-locals response) (assoc acc :used-locals (:used-locals response))
-                            (:err response) (assoc acc :error (:err response))
-                            (:out response) (update acc :output (fnil str "") (:out response))
-                            :else acc))
-                        {} responses)]
-      (if (:error result)
-        (let [error-msg (:error result)
-              output (:output result)
-              combined-error (if (seq output)
-                              (str error-msg "\nOutput: " output)
-                              error-msg)]
-          {:error combined-error
-           :status :error})
-        (let [used-locals (:used-locals result)
-              output (:output result)
-              combined-value (if (seq output)
-                              (str "Used locals at " file-path ":" line ":" column "\nLocals: " used-locals "\nOutput: " output)
-                              (str "Used locals at " file-path ":" line ":" column "\nLocals: " used-locals))]
-          {:value combined-value
-           :status :success})))
+    (if (nil? nrepl-client)
+      {:status :error :error "nREPL client is nil"}
+      (do
+        ;; Validate that the file exists
+        (when-not (.exists (java.io.File. file-path))
+          (throw (Exception. (str "File does not exist: " file-path))))
+        
+        (let [responses (nrepl/message nrepl-client 
+                                      {:op "find-used-locals" 
+                                       :file file-path
+                                       :line line
+                                       :column column})
+              result (reduce (fn [acc response]
+                              (cond
+                                (:used-locals response) (assoc acc :used-locals (:used-locals response))
+                                (:err response) (assoc acc :error (:err response))
+                                (:out response) (update acc :output (fnil str "") (:out response))
+                                :else acc))
+                            {} responses)]
+          (if (:error result)
+            (let [error-msg (:error result)
+                  output (:output result)
+                  combined-error (if (seq output)
+                                  (str error-msg "\nOutput: " output)
+                                  error-msg)]
+              {:error combined-error
+               :status :error})
+            (let [used-locals (:used-locals result)
+                  output (:output result)
+                  combined-value (if (seq output)
+                                  (str "Used locals at " file-path ":" line ":" column "\nLocals: " used-locals "\nOutput: " output)
+                                  (str "Used locals at " file-path ":" line ":" column "\nLocals: " used-locals))]
+              {:value combined-value
+               :status :success})))))
     (catch Exception e
       (log/log! {:level :error :msg "Error finding used locals" :data {:error (.getMessage e)}})
       {:error (.getMessage e)

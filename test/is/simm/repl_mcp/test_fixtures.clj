@@ -12,14 +12,6 @@
 
 (def test-nrepl-port (+ 57000 (rand-int 1000)))  ; Use random high port to avoid conflicts
 
-(defn port-available?
-  "Check if a port is available for binding"
-  [port]
-  (try
-    (with-open [socket (java.net.ServerSocket. port)]
-      true)
-    (catch Exception _e
-      false)))
 (def ^:dynamic *test-nrepl-server* nil)
 (def ^:dynamic *test-nrepl-client* nil)
 

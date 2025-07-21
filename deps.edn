@@ -16,6 +16,11 @@
  :aliases
  {:repl-mcp {:main-opts ["-m" "is.simm.repl-mcp"]
              :extra-paths ["test"]
+             :jvm-opts ["-Djdk.attach.allowAttachSelf"
+                        "-XX:+UnlockDiagnosticVMOptions"
+                        "-XX:+DebugNonSafepoints"
+                        "-XX:+EnableDynamicAgentLoading"
+                        "--enable-native-access=ALL-UNNAMED"]
              :extra-deps {nrepl/nrepl {:mvn/version "1.0.0"}
                           cider/cider-nrepl {:mvn/version "0.47.1"}
                           refactor-nrepl/refactor-nrepl {:mvn/version "3.10.0"}
@@ -34,6 +39,11 @@
                  {:mvn/version "0.10.9"}}
           :ns-default build}
   :test {:extra-paths ["test"]
+         :jvm-opts ["-Djdk.attach.allowAttachSelf"
+                    "-XX:+UnlockDiagnosticVMOptions"
+                    "-XX:+DebugNonSafepoints"
+                    "-XX:+EnableDynamicAgentLoading"
+                    "--enable-native-access=ALL-UNNAMED"]
          :extra-deps {io.github.cognitect-labs/test-runner
                       {:git/tag "v0.5.1" :git/sha "dfb30dd"}
 
