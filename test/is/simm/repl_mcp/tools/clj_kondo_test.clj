@@ -30,14 +30,14 @@
 (deftest lint-code-string-test
   (testing "lint-code-string with valid code"
     (let [result (clj-kondo-tools/lint-code-string "(defn test-fn [x] (+ x 1))")]
-      ;; Currently fails due to clj-kondo API parameter issue
-      (is (= (:status result) :error))
-      (is (contains? result :error))))
+      ;; clj-kondo returns :success with findings, not :error status
+      (is (= (:status result) :success))
+      (is (or (contains? result :findings) (contains? result :message)))))
   
   (testing "lint-code-string with invalid code"
     (let [result (clj-kondo-tools/lint-code-string "(defn broken [x (+ x 1))")]
-      (is (= (:status result) :error))
-      (is (contains? result :error)))))
+      (is (= (:status result) :success))
+      (is (or (contains? result :findings) (contains? result :error))))))
 
 (deftest mcp-tool-test
   (testing "lint-code tool returns proper MCP format"
