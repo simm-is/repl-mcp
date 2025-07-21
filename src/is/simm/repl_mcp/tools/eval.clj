@@ -1,199 +1,133 @@
 (ns is.simm.repl-mcp.tools.eval
-  (:require [is.simm.repl-mcp.interactive :refer [register-tool!]]
-            [nrepl.core :as nrepl]
-            [taoensso.telemere :as log]))
+  "Code evaluation tools for nREPL integration"
+  (:require 
+   [nrepl.core :as nrepl]
+   [taoensso.telemere :as log]
+   [clojure.java.io :as io]))
 
-;; Pure implementation functions for testing
+;; ===============================================
+;; Core nREPL Helper Functions
+;; ===============================================
 
-(defn format-result-for-mcp
-  "Format evaluation result with context."
-  [value namespace]
-  (let [result-str (if (nil? value)
-                     "nil"
-                     (str value))]
-    (if namespace
-      (str "[" namespace "] " result-str)
-      result-str)))
-
-(defn eval-code
-  "Evaluate Clojure code using nREPL client with proper timeout and interrupt handling. 
-   Creates a dedicated session per evaluation for complete isolation.
-   Returns result map with :value, :output, :error, :status."
-  [nrepl-client code & {:keys [namespace timeout]
-                                      :or {timeout 120000}}]
+(defn evaluate-code 
+  "Evaluate Clojure code in the nREPL session"
+  [nrepl-client code & {:keys [namespace timeout] :or {timeout 120000}}]
   (try
+    (log/log! {:level :info :msg "Evaluating code" :data {:code-length (count code)}})
+    
     (when (nil? nrepl-client)
       (throw (Exception. "nREPL client is nil")))
     
-    ;; Create a dedicated session for this evaluation
-    (let [clone-result (first (nrepl/message nrepl-client {:op "clone"}))
-          session-id (:new-session clone-result)]
+    (when (nil? code)
+      (throw (Exception. "Code is nil")))
+    
+    ;; Create dedicated session for isolation
+    (let [session (nrepl/new-session nrepl-client)
+          responses (nrepl/message nrepl-client 
+                                  (cond-> {:op "eval" :code code :session session}
+                                    namespace (assoc :ns namespace)))]
       
-      (when-not session-id
-        (throw (Exception. "Failed to create nREPL session")))
+      ;; Close session after evaluation
+      (try 
+        (nrepl/message nrepl-client {:op "close" :session session})
+        (catch Exception e
+          (log/log! {:level :warn :msg "Failed to close session" :data {:error (.getMessage e)}})))
       
-      (try
-        ;; Prepare eval message with dedicated session
-        (let [eval-msg (cond-> {:op "eval" :code code :session session-id}
-                         namespace (assoc :ns namespace))
-
-              ;; Set up timeout handling with interrupt
-              response-future (future
-                                (try
-                                  (doall (nrepl/message nrepl-client eval-msg))
-                                  (catch Exception _
-                                    ::eval-error)))
-
-              ;; Wait for response with timeout
-              responses (deref response-future timeout ::timeout)]
-
-          (cond
-            ;; Handle timeout - send interrupt to our session
-            (= responses ::timeout)
-            (do
-              ;; Try to send interrupt to our dedicated session
-              (try
-                (future (nrepl/message nrepl-client {:op "interrupt" :session session-id}))
-                (catch Exception _)) ; Ignore interrupt failures
-
-              ;; Cancel the future
-              (future-cancel response-future)
-
-              {:error (str "Operation timed out after " timeout "ms")
-               :status :timeout})
-
-            ;; Handle eval error
-            (= responses ::eval-error)
-            {:error "Error occurred during nREPL evaluation"
-             :status :error}
-
-            ;; Handle success - process responses normally
-            :else
-            (if (or (nil? responses) (empty? responses))
-              {:error "No response received from nREPL"
-               :status :error}
-
-              ;; Process successful responses
-              (let [values (nrepl/response-values responses)
-                    combined (nrepl/combine-responses responses)]
-
-                (cond
-                  (:err combined)
-                  (let [output (:out combined)
-                        error-msg (:err combined)
-                        combined-error (if (seq output)
-                                         (str error-msg "\nOutput: " output)
-                                         error-msg)]
-                    {:error combined-error
-                     :status :error})
-
-                  :else
-                  (let [eval-result (format-result-for-mcp (first values) namespace)
-                        output (:out combined)
-                        combined-value (if (seq output)
-                                         (str eval-result "\nOutput: " output)
-                                         eval-result)]
-                    {:value combined-value
-                     :status :success}))))))
-            (catch Exception e
-              {:error (.getMessage e)
-               :status :error})
-            ;; Always close the session to prevent accumulation
-            (finally
-              (try
-                (nrepl/message nrepl-client {:op "close" :session session-id})
-                (catch Exception _))) ; Ignore close failures
-    ))))
-
-;; MCP Tool Registration
-
-(register-tool! :eval
-  "Evaluate Clojure code in the connected nREPL session"
-  {:code {:type "string" :description "Clojure code to evaluate"}
-   :namespace {:type "string" :optional true :description "Namespace to evaluate in"}
-   :timeout {:type "number" :optional true :description "Timeout in milliseconds"}}
-  (fn [tool-call context]
-    (try
-      (log/log! {:level :info :msg "Eval tool entry" 
-                 :data {:tool-call tool-call :context-keys (keys context)}})
-      (let [{:strs [code namespace timeout]} (:args tool-call)
-            nrepl-client (:nrepl-client context)]
-        (log/log! {:level :info :msg "Eval tool called" 
-                   :data {:args (:args tool-call) 
-                          :code code 
-                          :namespace namespace 
-                          :timeout timeout
-                          :nrepl-client-available? (some? nrepl-client)}})
-        (when (nil? code)
-          (log/log! {:level :error :msg "Code is nil!" :data {:args (:args tool-call)}}))
-        (when (nil? nrepl-client)
-          (log/log! {:level :error :msg "nREPL client is nil!" :data {:context context}}))
-        (let [result (eval-code nrepl-client code :namespace namespace :timeout (or timeout 120000))]
-          (log/log! {:level :info :msg "Eval tool result" :data {:result result}})
-          result))
-      (catch Exception e
-        (log/log! {:level :error :msg "Eval tool handler failed" 
-                   :data {:error (.getMessage e) 
-                          :stack-trace (str e)
-                          :tool-call tool-call}})
-        {:error (.getMessage e) :status :error})))
-  :tags #{:development :repl :evaluation}
-  :dependencies #{:nrepl})
-
+      ;; Process responses
+      (let [result-msgs (filter #(contains? % :value) responses)
+            error-msgs (filter #(contains? % :err) responses)
+            output-msgs (filter #(contains? % :out) responses)
+            
+            values (mapv :value result-msgs)
+            errors (apply str (map :err error-msgs))
+            output (apply str (map :out output-msgs))]
+        
+        (if (seq error-msgs)
+          {:error errors :output output :status :error}
+          {:value (last values) :output output :status :success})))
+    
+    (catch Exception e
+      (log/log! {:level :error :msg "Evaluation failed" 
+                 :data {:error (.getMessage e) :code-length (count code)}})
+      {:error (.getMessage e) :status :error})))
 
 (defn load-clojure-file
-  "Load a Clojure file into nREPL session. Returns result map with :value, :output, :error, :status."
+  "Load a Clojure file into the nREPL session"
   [nrepl-client file-path]
   (try
     (log/log! {:level :info :msg "Loading file" :data {:file-path file-path}})
+    
     (when (nil? nrepl-client)
       (throw (Exception. "nREPL client is nil")))
-    (let [file-content (slurp file-path)
-          responses (nrepl/message nrepl-client {:op "load-file" 
-                                                :file file-content 
-                                                :file-path file-path})
-          result (reduce (fn [acc response]
-                          (cond
-                            (:value response) (assoc acc :value (:value response))
-                            (:err response) (assoc acc :error (:err response))
-                            (:out response) (update acc :output (fnil str "") (:out response))
-                            :else acc))
-                        {} responses)]
-      (if (:error result)
-        (let [error-msg (:error result)
-              output (:output result)
-              combined-error (if (seq output)
-                              (str error-msg "\nOutput: " output)
-                              error-msg)]
-          {:error combined-error
-           :status :error})
-        (let [load-result (:value result)
-              output (:output result)
-              combined-value (if (seq output)
-                              (str "File loaded: " file-path "\nResult: " load-result "\nOutput: " output)
-                              (str "File loaded: " file-path "\nResult: " load-result))]
-          {:value combined-value
-           :status :success})))
+    
+    (when-not (.exists (io/file file-path))
+      (throw (Exception. (str "File does not exist: " file-path))))
+    
+    (let [responses (nrepl/message nrepl-client {:op "load-file" :file (slurp file-path)})
+          error-msgs (filter #(contains? % :err) responses)]
+      
+      (if (seq error-msgs)
+        {:error (apply str (map :err error-msgs)) :status :error}
+        {:value (str "File loaded successfully: " file-path) :status :success}))
+    
     (catch Exception e
-      (log/log! {:level :error :msg "Error loading file" :data {:error (.getMessage e) :file-path file-path}})
-      {:error (.getMessage e)
-       :status :error})))
+      (log/log! {:level :error :msg "File loading failed" 
+                 :data {:error (.getMessage e) :file-path file-path}})
+      {:error (.getMessage e) :status :error})))
 
-(register-tool! :load-file
-  "Load a Clojure file into the nREPL session"
-  {:file-path {:type "string" :description "Path to the Clojure file to load"}}
-  (fn [tool-call context]
-    (try
-      (let [{:strs [file-path]} (:args tool-call)
-            nrepl-client (:nrepl-client context)]
-        (log/log! {:level :info :msg "Load-file tool called" 
-                   :data {:file-path file-path :nrepl-client-available? (some? nrepl-client)}})
-        (load-clojure-file nrepl-client file-path))
-      (catch Exception e
-        (log/log! {:level :error :msg "Load-file tool handler failed" 
-                   :data {:error (.getMessage e) 
-                          :stack-trace (str e)
-                          :tool-call tool-call}})
-        {:error (.getMessage e) :status :error})))
-  :tags #{:development :repl :file-loading}
-  :dependencies #{:nrepl})
+;; ===============================================
+;; Tool Implementations
+;; ===============================================
+
+(defn eval-tool [mcp-context arguments]
+  (log/log! {:level :debug :msg "Eval tool called" :data {:arguments arguments :context-keys (keys mcp-context)}})
+  (let [{:keys [code namespace timeout]} arguments
+        nrepl-client (:nrepl-client mcp-context)]
+    (log/log! {:level :debug :msg "Eval tool extracted params" :data {:code code :namespace namespace :timeout timeout :nrepl-client-available? (some? nrepl-client)}})
+    (if (nil? nrepl-client)
+      {:content [{:type "text" 
+                  :text "Error: nREPL client not available. Code evaluation requires an active nREPL connection."}]}
+      (let [result (evaluate-code nrepl-client code 
+                             :namespace namespace 
+                             :timeout (or timeout 120000))]
+        (log/log! {:level :debug :msg "Eval tool internal result" :data {:result result}})
+        {:content [{:type "text" 
+                    :text (if (= (:status result) :success)
+                            (str (:value result) 
+                                 (when (seq (:output result)) 
+                                   (str "\n" (:output result))))
+                            (str "Error: " (:error result)))}]}))))
+
+(defn load-file-tool [mcp-context arguments]
+  (let [{:keys [file-path]} arguments
+        nrepl-client (:nrepl-client mcp-context)]
+    (if (nil? nrepl-client)
+      {:content [{:type "text" 
+                  :text "Error: nREPL client not available. File loading requires an active nREPL connection."}]}
+      (let [result (load-clojure-file nrepl-client file-path)]
+        {:content [{:type "text" 
+                    :text (if (= (:status result) :success)
+                            (:value result)
+                            (str "Error: " (:error result)))}]}))))
+
+;; ===============================================
+;; Tool Definitions
+;; ===============================================
+
+(def tools
+  "Evaluation tool definitions for mcp-toolkit"
+  [{:name "eval"
+    :description "Evaluate Clojure code in the connected nREPL session"
+    :inputSchema {:type "object"
+                  :properties {:code {:type "string" :description "Clojure code to evaluate"}
+                              :namespace {:type "string" :description "Namespace to evaluate in"}
+                              :timeout {:type "number" :description "Timeout in milliseconds"}}
+                  :required ["code"]}
+    :tool-fn eval-tool}
+   
+   {:name "load-file"
+    :description "Load a Clojure file into the nREPL session"
+    :inputSchema {:type "object"
+                  :properties {:file-path {:type "string" :description "Path to the Clojure file to load"}}
+                  :required ["file-path"]}
+    :tool-fn load-file-tool}])

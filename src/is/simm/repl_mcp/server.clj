@@ -1,161 +1,273 @@
 (ns is.simm.repl-mcp.server
-  "Simplified MCP server using transport abstraction"
-  (:require [is.simm.repl-mcp.transport :as transport]
-            [nrepl.core :as nrepl]
-            [nrepl.server :as nrepl-server]
-            [taoensso.telemere :as log]
-            [cider.nrepl :refer [cider-nrepl-handler]]
-            [refactor-nrepl.middleware :refer [wrap-refactor]]
-            ;; Load transport implementations
-            [is.simm.repl-mcp.transports.stdio]
-            [is.simm.repl-mcp.transports.http-sse]))
+  "Multi-instance MCP server API working directly with mcp-toolkit"
+  (:require 
+   [is.simm.repl-mcp.tools :as tools]
+   [mcp-toolkit.server :as mcp-server]
+   [mcp-toolkit.json-rpc :as json-rpc]
+   [promesa.core :as p]
+   [jsonista.core :as j]
+   [nrepl.core :as nrepl]
+   [taoensso.telemere :as log]
+   [org.httpkit.server :as http-kit]
+   [reitit.ring :as reitit]
+   [clojure.spec.alpha :as s]))
 
-;; =============================================================================
-;; Server State
-;; =============================================================================
+;; ===============================================
+;; Configuration Specs
+;; ===============================================
 
-(defonce server-state (atom {:multi-transport-server nil
-                            :nrepl-server nil
-                            :nrepl-client nil}))
+(s/def ::instance-config map?) ; Allow any config map for flexibility
 
-;; =============================================================================
-;; nREPL Setup (unchanged from original)
-;; =============================================================================
+;; ===============================================
+;; nREPL Client Management
+;; ===============================================
 
-(defn start-nrepl-server!
-  "Start nREPL server with cider and refactor middleware"
-  [port]
-  (let [middleware-stack (-> cider-nrepl-handler
-                             (wrap-refactor))
-        server (nrepl-server/start-server 
-                :port port
-                :handler middleware-stack
-                :bind "127.0.0.1")]
-    (log/log! {:level :info :msg "nREPL server started" :data {:port port}})
-    server))
+(defonce nrepl-clients (atom {}))
 
-(defn connect-to-nrepl
-  "Connect to nREPL server and return client"
-  [port]
-  (let [client (nrepl/client (nrepl/connect :port port) Long/MAX_VALUE)]
-    (log/log! {:level :info :msg "Connected to nREPL server" :data {:port port}})
-    client))
+(defn create-or-get-nrepl-client
+  "Create or reuse nREPL client for given configuration"
+  [{:keys [port ip] :or {port 47888 ip "127.0.0.1"}}]
+  (let [client-key [port ip]]
+    (if-let [existing-client (get @nrepl-clients client-key)]
+      (do
+        (log/log! {:level :info :msg "Reusing existing nREPL client" 
+                   :data {:port port :ip ip}})
+        existing-client)
+      (try
+        (log/log! {:level :info :msg "Creating new nREPL client" 
+                   :data {:port port :ip ip}})
+        (let [transport (nrepl/connect :port port :host ip)
+              client (nrepl/client transport Long/MAX_VALUE)]
+          (swap! nrepl-clients assoc client-key client)
+          (log/log! {:level :info :msg "nREPL client created successfully" 
+                     :data {:port port :ip ip}})
+          client)
+        (catch Exception e
+          (log/log! {:level :error :msg "Failed to create nREPL client" 
+                     :data {:port port :ip ip :error (.getMessage e)}})
+          (throw e))))))
 
-(defn stop-nrepl-server!
-  "Stop nREPL server"
-  [server]
-  (when server
-    (nrepl-server/stop-server server)
-    (log/log! {:level :info :msg "nREPL server stopped"})))
+;; ===============================================
+;; Core Instance API
+;; ===============================================
 
-;; =============================================================================
-;; Simplified Server Functions
-;; =============================================================================
-
-(defn start-mcp-server!
-  "Start MCP server with configurable transports using transport abstraction"
-  [& {:keys [nrepl-port http-port transports] 
-      :or {nrepl-port 17888 http-port 18080 transports #{:stdio}}}]
+(defn create-mcp-server-instance!
+  "Create an MCP server instance that works directly with mcp-toolkit.
+   Returns an instance object that can be used directly with tool functions.
+   
+   Config map should contain:
+   - :tools - Vector of tool definitions (optional, defaults to built-in tools)
+   - :prompts - Vector of prompt definitions (optional) 
+   - :resources - Vector of resource definitions (optional)
+   - :server-info - Server info map (optional)
+   - :nrepl-client - nREPL client for tools that need it (optional)
+   - :nrepl-config - Configuration for nREPL client (optional)
+   
+   Example:
+   (create-mcp-server-instance! 
+     {:tools [{:name \"echo\" :description \"Echo tool\" 
+               :inputSchema {...} :tool-fn (fn [ctx args] ...)}]
+      :nrepl-config {:port 47888}
+      :server-info {:name \"my-server\" :version \"1.0.0\"}})"
+  [config]
+  (log/log! {:level :info :msg "Creating MCP server instance" :data {:config config}})
+  
   (try
-    ;; Start nREPL server
-    (let [nrepl-server (start-nrepl-server! nrepl-port)
-          _ (Thread/sleep 1000) ; Give nREPL time to start
-          nrepl-client (connect-to-nrepl nrepl-port)
+    (let [;; Get or create nREPL client if needed
+          nrepl-client (when-let [nrepl-config (:nrepl-config config)]
+                        (create-or-get-nrepl-client nrepl-config))
           
-          ;; Create transport configurations
-          transport-configs (cond-> {}
-                              (contains? transports :stdio)
-                              (assoc :stdio (transport/create-transport-config :stdio))
-                              
-                              (contains? transports :http)
-                              (assoc :http-sse (transport/create-transport-config :http-sse 
-                                                                                  :port http-port
-                                                                                  :host "localhost")))
+          ;; Prepare session config with defaults
+          session-config {:tools (or (:tools config) (tools/get-tool-definitions))
+                         :prompts (or (:prompts config) [])
+                         :resources (or (:resources config) [])
+                         :server-info (or (:server-info config) 
+                                         {:name "repl-mcp" :version "1.0.0"})}
           
-          ;; Create context with tools and prompts
-          context (transport/create-context)
+          ;; Create session state using mcp-toolkit
+          session-state (mcp-server/create-session session-config)
           
-          ;; Add nREPL client to context for tools that need it
-          enhanced-context (assoc context :nrepl-client nrepl-client
-                                         :nrepl-port nrepl-port)
+          ;; Wrap in atom as expected by mcp-toolkit functions
+          session-atom (atom session-state)
           
-          ;; Start multi-transport server
-          multi-server (transport/start-mcp-server! transport-configs enhanced-context)]
+          ;; Create the context that mcp-toolkit functions expect
+          mcp-context {:session session-atom
+                       :nrepl-client nrepl-client}
+          
+          ;; Create instance object
+          instance {:context mcp-context
+                   :session session-atom
+                   :config config
+                   :nrepl-client nrepl-client
+                   :created-at (java.time.Instant/now)}]
       
-      ;; Update server state
-      (swap! server-state assoc
-             :multi-transport-server multi-server
-             :nrepl-server nrepl-server
-             :nrepl-client nrepl-client)
+      (log/log! {:level :info :msg "MCP server instance created successfully" 
+                 :data {:has-nrepl-client (some? nrepl-client)
+                        :tool-count (count (:tools session-config))}})
       
-      ;; Log startup info
-      (doseq [transport-type (keys transport-configs)]
-        (log/log! {:level :info :msg "MCP transport started" 
-                   :data {:transport-type transport-type}}))
-      
-      (log/log! {:level :info :msg "nREPL server running" :data {:port nrepl-port}})
-      (log/log! {:level :info :msg "MCP server started successfully" 
-                 :data {:transports (keys transport-configs)
-                        :tools-count (count (:tools enhanced-context))
-                        :prompts-count (count (:prompts enhanced-context))}})
-      
-      multi-server)
+      instance)
     
     (catch Exception e
-      (log/log! {:level :error :msg "Failed to start MCP server" 
+      (log/log! {:level :error :msg "Failed to create MCP server instance" 
                  :data {:error (.getMessage e)}})
       (throw e))))
 
-(defn stop-mcp-server!
-  "Stop MCP server and nREPL server"
-  []
-  (let [{:keys [multi-transport-server nrepl-server]} @server-state]
+;; ===============================================
+;; Dynamic Tool Management (Direct mcp-toolkit)
+;; ===============================================
+
+(defn add-tool!
+  "Add a tool to the MCP server instance.
+   
+   instance: Instance object returned by create-mcp-server-instance!
+   tool: Tool definition map with :name, :description, :inputSchema, :tool-fn
+   
+   Example:
+   (add-tool! instance
+     {:name \"greet\" 
+      :description \"Greet someone\"
+      :inputSchema {:type \"object\"
+                   :properties {:name {:type \"string\"}}
+                   :required [\"name\"]}
+      :tool-fn (fn [context args]
+                {:content [{:type \"text\" :text (str \"Hello, \" (:name args) \"!\")}]})})"
+  [instance tool]
+  (try
+    (log/log! {:level :info :msg "Adding tool to instance" 
+               :data {:tool-name (:name tool)}})
     
-    ;; Stop multi-transport server
-    (when multi-transport-server
-      (transport/stop! multi-transport-server)
-      (log/log! {:level :info :msg "Multi-transport MCP server stopped"}))
+    ;; Use mcp-toolkit's add-tool function directly
+    (mcp-server/add-tool (:context instance) tool)
     
-    ;; Stop nREPL server
-    (stop-nrepl-server! nrepl-server)
+    (log/log! {:level :info :msg "Tool added successfully" 
+               :data {:tool-name (:name tool)}})
+    :added
     
-    ;; Clear state
-    (reset! server-state {:multi-transport-server nil
-                          :nrepl-server nil
-                          :nrepl-client nil})
+    (catch Exception e
+      (log/log! {:level :error :msg "Failed to add tool" 
+                 :data {:tool-name (:name tool) :error (.getMessage e)}})
+      (throw e))))
+
+(defn remove-tool!
+  "Remove a tool from the MCP server instance.
+   
+   instance: Instance object returned by create-mcp-server-instance!
+   tool-name: String name of tool to remove"
+  [instance tool-name]
+  (try
+    (log/log! {:level :info :msg "Removing tool from instance" 
+               :data {:tool-name tool-name}})
     
-    (log/log! {:level :info :msg "All servers stopped"})))
+    ;; Use mcp-toolkit's remove-tool function directly
+    (mcp-server/remove-tool (:context instance) {:name tool-name})
+    
+    (log/log! {:level :info :msg "Tool removed successfully" 
+               :data {:tool-name tool-name}})
+    :removed
+    
+    (catch Exception e
+      (log/log! {:level :error :msg "Failed to remove tool" 
+                 :data {:tool-name tool-name :error (.getMessage e)}})
+      (throw e))))
 
-(defn restart-mcp-server!
-  "Restart MCP server with same configuration"
+(defn notify-tool-list-changed!
+  "Notify clients that the tool list has changed.
+   
+   instance: Instance object returned by create-mcp-server-instance!
+   
+   Note: This is automatically called by add-tool! and remove-tool!"
+  [instance]
+  (try
+    (log/log! {:level :info :msg "Notifying tool list changed"})
+    
+    ;; Use mcp-toolkit's notify function directly
+    (mcp-server/notify-tool-list-changed (:context instance))
+    
+    (log/log! {:level :info :msg "Tool list change notification sent"})
+    :notified
+    
+    (catch Exception e
+      (log/log! {:level :error :msg "Failed to notify tool list changed" 
+                 :data {:error (.getMessage e)}})
+      (throw e))))
+
+;; ===============================================
+;; Instance Information
+;; ===============================================
+
+(defn get-tools
+  "Get all tools from an instance"
+  [instance]
+  (-> @(:session instance) :tool-by-name vals vec))
+
+(defn get-tool
+  "Get a specific tool by name from an instance"
+  [instance tool-name]
+  (-> @(:session instance) :tool-by-name (get tool-name)))
+
+(defn list-tool-names
+  "List all tool names in an instance"
+  [instance]
+  (-> @(:session instance) :tool-by-name keys vec))
+
+(defn instance-info
+  "Get information about an instance"
+  [instance]
+  (select-keys instance [:config :created-at :nrepl-client]))
+
+;; ===============================================
+;; Convenience Functions
+;; ===============================================
+
+(defn create-stdio-instance!
+  "Create an instance configured for STDIO transport"
+  [& {:keys [tools nrepl-config]
+      :or {tools (tools/get-tool-definitions)
+           nrepl-config {:port 47888}}}]
+  (create-mcp-server-instance!
+    {:tools tools
+     :nrepl-config nrepl-config
+     :server-info {:name "repl-mcp-stdio" :version "1.0.0"}}))
+
+(defn create-sse-instance!
+  "Create an instance configured for SSE transport"
+  [& {:keys [tools nrepl-config http-port]
+      :or {tools (tools/get-tool-definitions)
+           nrepl-config {:port 47888}
+           http-port 18080}}]
+  (create-mcp-server-instance!
+    {:tools tools
+     :nrepl-config nrepl-config
+     :transport-config {:type :sse :port http-port :ip "127.0.0.1"}
+     :server-info {:name "repl-mcp-sse" :version "1.0.0"}}))
+
+;; ===============================================
+;; Cleanup
+;; ===============================================
+
+(defn close-nrepl-client!
+  "Close a specific nREPL client"
+  [{:keys [port ip] :or {port 47888 ip "127.0.0.1"}}]
+  (let [client-key [port ip]]
+    (when-let [client (get @nrepl-clients client-key)]
+      (try
+        (log/log! {:level :info :msg "Closing nREPL client" 
+                   :data {:port port :ip ip}})
+        (.close client)
+        (swap! nrepl-clients dissoc client-key)
+        (log/log! {:level :info :msg "nREPL client closed" 
+                   :data {:port port :ip ip}})
+        (catch Exception e
+          (log/log! {:level :warn :msg "Error closing nREPL client" 
+                     :data {:port port :ip ip :error (.getMessage e)}}))))))
+
+(defn close-all-nrepl-clients!
+  "Close all nREPL clients"
   []
-  (log/log! {:level :info :msg "Restarting MCP server"})
-  (stop-mcp-server!)
-  (Thread/sleep 1000)
-  (start-mcp-server!))
-
-(defn get-server-info
-  "Get information about running servers"
-  []
-  (let [{:keys [multi-transport-server nrepl-server]} @server-state]
-    {:mcp-server (when multi-transport-server
-                   (transport/info multi-transport-server))
-     :nrepl-running? (some? nrepl-server)}))
-
-(defn server-info
-  "Alias for get-server-info for compatibility"
-  []
-  (get-server-info))
-
-;; =============================================================================
-;; Dynamic Tool Management
-;; =============================================================================
-
-(defn add-tool-to-running-server!
-  "Add a registered tool to the running MCP server instances.
-  This would require extending the transport protocol to support dynamic tool addition."
-  [tool-name]
-  (log/log! {:level :warn :msg "Dynamic tool addition not yet implemented in transport abstraction"
-             :data {:tool-name tool-name}})
-  ;; TODO: Implement dynamic tool addition in transport protocol
-  false)
+  (doseq [[client-key client] @nrepl-clients]
+    (try
+      (.close client)
+      (catch Exception e
+        (log/log! {:level :warn :msg "Error closing nREPL client during shutdown" 
+                   :data {:client-key client-key :error (.getMessage e)}}))))
+  (reset! nrepl-clients {}))

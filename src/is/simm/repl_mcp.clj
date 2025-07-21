@@ -1,316 +1,271 @@
 (ns is.simm.repl-mcp
-  (:require [is.simm.repl-mcp.server :as server]
-            [is.simm.repl-mcp.api :as api]
-            [is.simm.repl-mcp.logging :as logging]
-            [taoensso.telemere :as log]
-            [clojure.java.io :as io]
-            [clojure.string :as str])
-  (:gen-class))
+  "Final simplified MCP server using direct mcp-toolkit integration"
+  (:require 
+   [is.simm.repl-mcp.server :as server]
+   [is.simm.repl-mcp.tools :as tools]
+   [is.simm.repl-mcp.logging :as logging]
+   [nrepl.server :as nrepl-server]
+   [taoensso.telemere :as log]
+   [clojure.tools.cli :as cli]
+   [clojure.string :as str]
+   [mcp-toolkit.json-rpc :as json-rpc]
+   [jsonista.core :as j])
+  (:gen-class)
+  (:import (clojure.lang LineNumberingPushbackReader)
+           (java.io OutputStreamWriter)))
 
-;; Utility function to require namespaces with error handling
-(defn try-require
-  "Attempt to require a namespace, logging any errors." 
-  [ns]
-  (try
-    (require ns)
-    (catch Exception e
-      (log/log! {:level :warn :msg (str "Failed to require " ns) :error (.getMessage e)}))))
+;; ===============================================
+;; Configuration and CLI
+;; ===============================================
 
-(defn get-prompt-args
-  "Get argument definitions for specific prompts"
-  [prompt-name]
-  (case prompt-name
-    :tdd_workflow {"function-name" {"description" "Name of the function to implement" "required" true}
-                   "namespace" {"description" "Namespace for the function" "required" true}
-                   "description" {"description" "Description of what the function should do" "required" true}}
-    :debug_function {"function-name" {"description" "Name of the function to debug" "required" true}
-                     "namespace" {"description" "Namespace containing the function" "required" true}
-                     "issue" {"description" "Description of the issue" "required" true}
-                     "expected" {"description" "Expected behavior" "required" true}
-                     "actual" {"description" "Actual behavior" "required" true}
-                     "file-path" {"description" "Path to the file containing the function" "required" false}
-                     "project-root" {"description" "Root directory of the project" "required" false}}
-    :refactor_extract_function {"source-function" {"description" "Name of the source function" "required" true}
-                                "namespace" {"description" "Namespace containing the function" "required" true}
-                                "new-function-name" {"description" "Name for the new extracted function" "required" true}
-                                "code-to-extract" {"description" "Code snippet to extract" "required" true}
-                                "file-path" {"description" "Path to the source file" "required" true}}
-    {}))
+(def cli-options
+  [["-p" "--nrepl-port PORT" "nREPL server port"
+    :default 47888
+    :parse-fn #(Integer/parseInt %)
+    :validate [#(< 0 % 0x10000) "Must be a number between 0 and 65536"]]
+   
+   ["-h" "--http-port PORT" "HTTP server port for SSE transport"
+    :default 18080
+    :parse-fn #(Integer/parseInt %)
+    :validate [#(< 0 % 0x10000) "Must be a number between 0 and 65536"]]
+   
+   ["-t" "--transport TRANSPORT" "Transport type (stdio or sse)"
+    :default :stdio
+    :parse-fn keyword
+    :validate [#{:stdio :sse} "Must be either 'stdio' or 'sse'"]]
+   
+   ["-v" "--verbose" "Enable verbose logging"]
+   
+   ["-?" "--help" "Show help"]])
 
-(defn load-prompts-from-resources!
-  "Load workflow prompts from resources/prompts/workflow directory"
-  []
-  (let [prompts-dir "prompts/workflow/"
-        prompts-resource (io/resource prompts-dir)]
-    (when prompts-resource
-      (let [prompt-files (-> prompts-resource
-                            io/file
-                            .listFiles
-                            seq)]
-        (when prompt-files
-          (doseq [file prompt-files
-                  :when (str/ends-with? (.getName file) ".mustache")]
-            (let [prompt-name (-> (.getName file)
-                                 (str/replace #"\.mustache$" "")
-                                 (str/replace #"-" "_")
-                                 keyword)
-                  template (slurp file)
-                  prompt-args (get-prompt-args prompt-name)]
-              (api/register-prompt! prompt-name
-                                   (str "Workflow prompt: " (.getName file))
-                                   prompt-args
-                                   template)
-              (log/log! {:level :info :msg "Loaded workflow prompt" :data {:prompt-name prompt-name :file (.getName file) :args (keys prompt-args)}}))))))))
+(defn usage [options-summary]
+  (->> ["Final simplified repl-mcp server using direct mcp-toolkit integration"
+        ""
+        "Usage: repl-mcp-simple [options]"
+        ""
+        "Options:"
+        options-summary
+        ""
+        "Examples:"
+        "  repl-mcp-simple                    # Start with STDIO transport"
+        "  repl-mcp-simple -t sse -p 19888   # Start with SSE transport (when implemented)"
+        ""]
+       (clojure.string/join "\n")))
 
-;; Load workflow prompts after tools are loaded
-(load-prompts-from-resources!)
+(defn error-msg [errors]
+  (str "The following errors occurred while parsing your command:\n\n"
+       (clojure.string/join "\n" errors)))
 
-(defn start-server!
-  "Start the MCP server with transport configuration"
-  [& {:keys [nrepl-port http-port transports] :or {nrepl-port 17888 http-port 18080 transports #{:stdio}}}]
-  (log/log! {:level :info :msg "Starting repl-mcp server" :data {:nrepl-port nrepl-port :http-port http-port :transports transports}})
-  (server/start-mcp-server! :nrepl-port nrepl-port :http-port http-port :transports transports))
-
-(defn stop-server!
-  "Stop the MCP server"
-  []
-  (log/log! {:level :info :msg "Stopping repl-mcp server"})
-  (server/stop-mcp-server!))
-
-(defn restart-server!
-  "Restart the MCP server"
-  []
-  (log/log! {:level :info :msg "Restarting repl-mcp server"})
-  (server/restart-mcp-server!))
-
-(defn server-info
-  "Get current server information"
-  []
-  (server/server-info))
-
-(defn list-tools
-  "List all available tools"
-  []
-  (api/list-tools))
-
-(defn tool-info
-  "Get information about a specific tool"
-  [tool-name]
-  (api/get-tool tool-name))
-
-(defn tool-help
-  "Get basic information for a specific tool"
-  [tool-name]
-  (when-let [tool-info (api/get-tool tool-name)]
-    (:description tool-info)))
-
-(defn list-prompts
-  "List available MCP workflow prompts"
-  []
-  (api/list-prompts))
-
-(defn parse-args
-  "Parse command line arguments"
+(defn validate-args
+  "Validate command line arguments."
   [args]
-  (let [parsed-args (loop [remaining args
-                          opts {:nrepl-port nil :http-port nil :transports #{:stdio} :command :start}]
-                     (if (empty? remaining)
-                       opts
-                       (let [arg (first remaining)
-                             rest-args (rest remaining)]
-                         (cond
-                           ;; nREPL port flag
-                           (= arg "--nrepl-port")
-                           (if (and (seq rest-args) (re-matches #"\d+" (first rest-args)))
-                             (recur (rest rest-args) (assoc opts :nrepl-port (Integer/parseInt (first rest-args))))
-                             (recur rest-args (assoc opts :nrepl-port-missing-value true)))
-                           
-                           ;; HTTP port flag
-                           (= arg "--http-port")
-                           (if (and (seq rest-args) (re-matches #"\d+" (first rest-args)))
-                             (recur (rest rest-args) (assoc opts :http-port (Integer/parseInt (first rest-args))))
-                             (recur rest-args (assoc opts :http-port-missing-value true)))
-                           
-                           ;; Transport options
-                           (= arg "--stdio-only")
-                           (recur rest-args (assoc opts :transports #{:stdio}))
-                           
-                           (= arg "--http-only") 
-                           (recur rest-args (assoc opts :transports #{:http}))
-                           
-                           (= arg "--dual-transport")
-                           (recur rest-args (assoc opts :transports #{:stdio :http}))
-                           
-                           ;; Introspection commands
-                           (= arg "--list-tools")
-                           (recur rest-args (assoc opts :command :list-tools))
-                           
-                           (= arg "--list-prompts")
-                           (recur rest-args (assoc opts :command :list-prompts))
-                           
-                           (= arg "--tool-help")
-                           (if (seq rest-args)
-                             (recur (rest rest-args) (assoc opts :command :tool-help :tool-name (first rest-args)))
-                             (recur rest-args (assoc opts :command :tool-help-missing-name)))
-                           
-                           (= arg "--help")
-                           (recur rest-args (assoc opts :command :help))
-                           
-                           ;; Skip unknown arguments
-                           :else
-                           (recur rest-args opts)))))]
-    parsed-args))
+  (let [{:keys [options arguments errors summary]} (cli/parse-opts args cli-options)]
+    (cond
+      (:help options) ; help => exit OK with usage summary
+      {:exit-message (usage summary) :ok? true}
+      
+      errors ; errors => exit with description of errors
+      {:exit-message (error-msg errors)}
+      
+      :else ; success => run program with options
+      {:options options})))
 
-(defn print-help
-  "Print help information"
-  []
-  (println "repl-mcp - Model Context Protocol server for Clojure development")
-  (println)
-  (println "Usage:")
-  (println "  clojure -M:run [options]")
-  (println)
-  (println "Server Options:")
-  (println "  --nrepl-port NUM Start nREPL server on specific port (default: 17888)")
-  (println "  --http-port NUM  Start HTTP+SSE transport on specific port (default: 18080)")
-  (println "  --stdio-only     Start with STDIO transport only (default)")
-  (println "  --http-only      Start with HTTP+SSE transport only")
-  (println "  --dual-transport Start with both STDIO and HTTP+SSE transports")
-  (println)
-  (println "Introspection Options:")
-  (println "  --list-tools     List all available tools")
-  (println "  --list-prompts   List all available prompts")
-  (println "  --tool-help NAME Show help for specific tool")
-  (println "  --help           Show this help message")
-  (println)
-  (println "Examples:")
-  (println "  clojure -M:run                         # Start with STDIO transport")
-  (println "  clojure -M:run --http-only              # Start with HTTP transport only")
-  (println "  clojure -M:run --http-port 8080         # HTTP transport on custom port")
-  (println "  clojure -M:run --nrepl-port 7890 --dual-transport  # Custom nREPL port with both transports")
-  (println "  clojure -M:run --list-tools             # List all available tools")
-  (println "  clojure -M:run --tool-help eval         # Show help for eval tool"))
+;; ===============================================
+;; Server Lifecycle (Simplified)
+;; ===============================================
 
-(defn print-tools
-  "Print all available tools"
-  []
-  (println "Available Tools:")
-  (println)
-  (let [tools (list-tools)]
-    (doseq [[tool-name tool-info] tools]
-      (println (format "  %-25s %s" (name tool-name) (:description tool-info))))))
+(defonce server-state (atom nil))
 
-(defn print-prompts  
-  "Print all available prompts"
-  []
-  (println "Available Prompts:")
-  (println)
-  (let [prompts (list-prompts)]
-    (if (empty? prompts)
-      (println "  No prompts currently registered")
-      (doseq [[prompt-name prompt-info] prompts]
-        (println (format "  %-25s %s" (name prompt-name) (:description prompt-info)))))))
+(defn listen-messages 
+  "Listen for JSON-RPC messages on stdin and handle them using mcp-toolkit"
+  [context ^LineNumberingPushbackReader reader]
+  (let [{:keys [send-message]} context
+        json-mapper (j/object-mapper {:decode-key-fn keyword})]
+    (loop []
+      ;; line = nil means that the reader is closed
+      (when-some [line (.readLine reader)]
+        (let [message (try
+                        ;; Parse JSON message per line
+                        (log/log! {:level :debug :msg "Received STDIO line" :data {:line line}})
+                        (j/read-value line json-mapper)
+                        (catch Exception e
+                          (log/log! {:level :error :msg "JSON parse error" 
+                                     :data {:line line :error (.getMessage e)}})
+                          (send-message json-rpc/parse-error-response)
+                          nil))]
+          (if (nil? message)
+            (recur)
+            (do
+              (log/log! {:level :debug :msg "Parsed JSON message" :data {:message message}})
+              (log/log! {:level :debug :msg "Calling json-rpc/handle-message" :data {:context-keys (keys context)}})
+              (json-rpc/handle-message context message)
+              (log/log! {:level :debug :msg "Finished json-rpc/handle-message"})
+              (recur))))))))
 
-(defn print-tool-help
-  "Print help for a specific tool"
-  [tool-name]
-  (if-let [tool-data (tool-info (keyword tool-name))]
-    (do
-      (println (format "Tool: %s" tool-name))
-      (println (format "Description: %s" (:description tool-data)))
-      (when-let [params (:parameters tool-data)]
-        (println "Parameters:")
-        (doseq [[param-name param-info] params]
-          (println (format "  %-15s %s (%s)" 
-                          (name param-name) 
-                          (get param-info "description" "No description") 
-                          (get param-info "type" "unknown"))))))
-    (println (format "Tool '%s' not found. Use --list-tools to see available tools." tool-name))))
-
-(defn -main
-  "Main entry point - starts the server or runs introspection commands
-  
-  Usage:
-    clojure -M:run [options]
-    
-  See --help for full usage information."
-  [& args]
-  (let [{:keys [command nrepl-port http-port transports tool-name nrepl-port-missing-value http-port-missing-value]} (parse-args args)
-        nrepl-port (or nrepl-port 17888)
-        http-port (or http-port 18080)]
-    
-    ;; Check for argument parsing errors
-    (when nrepl-port-missing-value
-      (println "Error: --nrepl-port requires a numeric value")
-      (println "Usage: clojure -M:run --nrepl-port PORT")
-      (System/exit 1))
-    
-    (when http-port-missing-value
-      (println "Error: --http-port requires a numeric value")
-      (println "Usage: clojure -M:run --http-port PORT")
-      (System/exit 1))
-    
-    (case command
-      :help
-      (do
-        (print-help)
-        (System/exit 0))
-
-      :list-tools
-      (do
-        ;; Need to initialize tools for introspection
-        (print-tools)
-        (System/exit 0))
-
-      :list-prompts
-      (do
-        ;; Need to initialize tools for introspection
-        (print-prompts)
-        (System/exit 0))
-
-      :tool-help
-      (if tool-name
-        (print-tool-help tool-name)
+(defn start-nrepl-server!
+  "Start nREPL server if not already running"
+  [port]
+  (try
+    (log/log! {:level :info :msg "Starting nREPL server" :data {:port port}})
+    (let [server (nrepl-server/start-server :port port)]
+      (log/log! {:level :info :msg "nREPL server started" :data {:port port}})
+      server)
+    (catch Exception e
+      (if (re-find #"Address already in use" (.getMessage e))
         (do
-          (println "Error: --tool-help requires a tool name")
-          (println "Usage: clojure -M:run --tool-help TOOL_NAME")
-          (println "Use --list-tools to see available tools")
-          (System/exit 1)))
+          (log/log! {:level :info :msg "nREPL server already running" :data {:port port}})
+          nil) ; Server already running
+        (throw e)))))
 
-      :tool-help-missing-name
+(defn start-mcp-server!
+  "Start the simplified MCP server"
+  [config]
+  (log/log! {:level :info :msg "Starting simplified repl-mcp server" :data config})
+  
+  ;; Start nREPL server if needed
+  (let [nrepl-server (start-nrepl-server! (:nrepl-port config))]
+    
+    ;; Give nREPL server time to start
+    (Thread/sleep 1000)
+    
+    ;; Create instance using simplified API
+    (let [instance-config {:tools (tools/get-tool-definitions)
+                          :nrepl-config {:port (:nrepl-port config)
+                                        :ip "127.0.0.1"}
+                          :server-info {:name "repl-mcp-simple" :version "1.0.0"}}
+          
+          ;; Create instance directly - no complex lifecycle management
+          instance (server/create-mcp-server-instance! instance-config)]
+      
+      ;; Store state for cleanup
+      (reset! server-state {:nrepl-server nrepl-server
+                           :instance instance
+                           :config config})
+      
+      (log/log! {:level :info :msg "Simplified repl-mcp server started successfully" 
+                 :data {:transport (:transport config)
+                        :nrepl-port (:nrepl-port config)
+                        :tool-count (count (tools/get-tool-definitions))}})
+      
+      {:nrepl-server nrepl-server :instance instance})))
+
+(defn stop-mcp-server!
+  "Stop the simplified MCP server"
+  []
+  (when-let [state @server-state]
+    (log/log! {:level :info :msg "Stopping simplified repl-mcp server"})
+    
+    ;; Simple cleanup - instance is self-contained, no complex lifecycle
+    (when-let [nrepl-server (:nrepl-server state)]
+      (try
+        (nrepl-server/stop-server nrepl-server)
+        (log/log! {:level :info :msg "nREPL server stopped"})
+        (catch Exception e
+          (log/log! {:level :warn :msg "Error stopping nREPL server" 
+                     :data {:error (.getMessage e)}}))))
+    
+    ;; Close nREPL clients
+    (when-let [instance (:instance state)]
+      (when-let [nrepl-config (get-in instance [:config :nrepl-config])]
+        (log/log! {:level :info :msg "Server stopped"})))
+    
+    (reset! server-state nil)
+    (log/log! {:level :info :msg "Simplified repl-mcp server stopped"})))
+
+;; ===============================================
+;; Main Entry Point (Simplified)
+;; ===============================================
+
+(defn exit [status msg]
+  (println msg)
+  (System/exit status))
+
+(defn -main [& args]
+  ;; Parse and validate arguments
+  (let [{:keys [options exit-message ok?]} (validate-args args)]
+    ;; Set up logging
+    (logging/setup-file-logging! (= (:transport options) :stdio))
+
+    (if exit-message
+      (exit (if ok? 0 1) exit-message)
+
+      ;; Configure logging level
       (do
-        (println "Error: --tool-help requires a tool name")
-        (println "Usage: clojure -M:run --tool-help TOOL_NAME")
-        (System/exit 1))
+        (when (:verbose options)
+          (log/set-min-level! :debug))
 
-      :start
-      (do
-        ;; Setup file-only logging immediately to avoid stdout contamination
-        ;; This must happen before any tool loading that might trigger logging
-        (logging/setup-file-logging! (contains? transports :stdio))
+        ;; Add shutdown hook
+        (.addShutdownHook (Runtime/getRuntime)
+                          (Thread. #(stop-mcp-server!)))
 
-        ;; Now require tools AFTER logging is configured for file-only output
-        (try-require '[is.simm.repl-mcp.tools.eval])
-        (try-require '[is.simm.repl-mcp.tools.refactor])
-        (try-require '[is.simm.repl-mcp.tools.structural-edit])
-        (try-require '[is.simm.repl-mcp.tools.cider-nrepl])
-        (try-require '[is.simm.repl-mcp.tools.function-refactor])
-        (try-require '[is.simm.repl-mcp.tools.test-generation])
-        (try-require '[is.simm.repl-mcp.tools.clj-kondo])
-        (try-require '[is.simm.repl-mcp.tools.deps-management])
-        (try-require '[is.simm.repl-mcp.tools.navigation])
-        (try-require '[is.simm.repl-mcp.tools.profiling])
+        ;; Start server
+        (try
+          (let [config {:nrepl-port (:nrepl-port options)
+                        :http-port (:http-port options)
+                        :transport (:transport options)}]
 
-        ;; Logging is already setup at namespace load time
-        (start-server! :nrepl-port nrepl-port :http-port http-port :transports transports)
+            (start-mcp-server! config)
 
-        ;; Do not print to stdout when using STDIO transport - 
-        ;; stdout is reserved for JSON-RPC messages only
-        ;; All status/debug info goes to log file instead
-        (log/log! {:level :info :msg "MCP server started successfully"})
-        (log/log! {:level :info :msg "Available tools" :data {:tools (keys (list-tools))}})
-        (log/log! {:level :info :msg "Available prompts" :data {:prompts (keys (list-prompts))}})
-        (log/log! {:level :info :msg "Server ready for connections" :data {:transports transports}})
+            ;; For STDIO transport, we're ready for MCP communication
+            ;; For SSE transport, we would need to implement the HTTP server
+            (case (:transport options)
+              :stdio
+              (do
+                (log/log! {:level :info :msg "STDIO MCP server ready for connections"})
+                ;; Start STDIO JSON-RPC transport using mcp-toolkit pattern
+                (let [instance (:instance @server-state)
+                      session (:session instance)
+                      nrepl-client (:nrepl-client instance)
+                      context {:session session
+                               :nrepl-client nrepl-client
+                               :send-message (let [^OutputStreamWriter writer *out*
+                                                   json-mapper (j/object-mapper {:encode-key-fn name})]
+                                               (fn [message]
+                                                 (.write writer (j/write-value-as-string message json-mapper))
+                                                 (.write writer "\n")
+                                                 (.flush writer)))}
+                      reader (LineNumberingPushbackReader. *in*)]
+                  (listen-messages context reader)))
 
-        ;; Keep the main thread alive
-        (while true
-          (Thread/sleep 1000))))))
+              :sse
+              (do
+                (log/log! {:level :warn :msg "SSE transport not yet implemented in simplified version"})
+                (log/log! {:level :info :msg "Use STDIO transport for now"})
+                (exit 1 "SSE transport not implemented"))))
+          (catch Exception e
+            (log/log! {:level :error :msg "Failed to start simplified server"
+                       :data {:error (.getMessage e)}})
+            (exit 1 (str "Error: " (.getMessage e)))))))))
+
+;; ===============================================
+;; REPL Development Helpers
+;; ===============================================
+
+(comment
+  ;; Start server for development
+  (start-mcp-server! {:nrepl-port 47888
+                     :transport :stdio})
+  
+  ;; Stop server
+  (stop-mcp-server!)
+  
+  ;; Test dynamic tool management
+  (let [instance (:instance @server-state)]
+    (println "Current tools:" (count (tools/get-tool-definitions)))
+    
+    ;; Add a custom tool
+    (server/add-tool! instance
+      {:name "hello"
+       :description "Say hello"
+       :inputSchema {:type "object"
+                    :properties {:name {:type "string"}}
+                    :required ["name"]}
+       :tool-fn (fn [context {:keys [name]}]
+                 {:content [{:type "text" :text (str "Hello, " name "!")}]})})
+    
+    (println "After adding hello tool: tool added successfully")
+    
+    ;; Remove the tool
+    (server/remove-tool! instance "hello")
+    
+    (println "After removing hello tool: tool removed successfully")))

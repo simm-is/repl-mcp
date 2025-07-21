@@ -1,306 +1,304 @@
 (ns is.simm.repl-mcp.tools.navigation
-  "Advanced navigation tools for Clojure codebases"
-  (:require [clojure.string :as str]
-            [clojure.walk :as walk]
-            [is.simm.repl-mcp.interactive :refer [register-tool!]]
-            [nrepl.core :as nrepl]
-            [taoensso.telemere :as log]))
+  "Advanced code navigation tools using refactor-nrepl"
+  (:require 
+   [nrepl.core :as nrepl]
+   [clojure.string :as str]
+   [clojure.java.io :as io]
+   [taoensso.telemere :as log]))
 
-;; Call Hierarchy Implementation
+;; ===============================================
+;; Navigation Functions 
+;; ===============================================
 
 (defn bencode-friendly-data
-  "Transform data to be bencode-friendly by handling Boolean values and other problematic types"
+  "Transform data to be bencode-friendly"
   [data]
-  (walk/postwalk
-   (fn [x]
-     (cond
-       (boolean? x) (if x "true" "false")  ; Convert booleans to strings
-       (set? x) (vec x)                   ; Convert sets to vectors
-       :else x))
-   data))
+  (cond
+    (map? data) (reduce-kv (fn [acc k v] (assoc acc k (bencode-friendly-data v))) {} data)
+    (coll? data) (mapv bencode-friendly-data data)
+    (boolean? data) (str data)
+    (set? data) (vec data)
+    :else data))
 
 (defn send-nrepl-message
-  "Send a synchronous nREPL message and return the combined response"
+  "Send nREPL message and handle responses with special processing for find-symbol"
   [nrepl-client message]
-  (log/log! {:level :debug :msg "Sending nREPL message" :data {:message message}})
-  (let [responses (nrepl/message nrepl-client message)]
-    (log/log! {:level :debug :msg "Raw nREPL responses" :data {:count (count responses) :responses responses}})
-    ;; For find-symbol operations, collect all occurrences
-    (if (= (:op message) "find-symbol")
-      (let [occurrences (->> responses
-                             (filter :occurrence)
-                             (map :occurrence))
-            _ (log/log! {:level :debug :msg "Filtered occurrences" :data {:count (count occurrences) :occurrences occurrences}})
-            final-response (->> responses
-                                (filter :status)
-                                first)
-            _ (log/log! {:level :debug :msg "Final response" :data {:final-response final-response}})
-            ;; Parse occurrences from string format if needed
-            parsed-occurrences (if (and (seq occurrences) (string? (first occurrences)))
-                                 (map #(read-string %) occurrences)
-                                 occurrences)
-            result (bencode-friendly-data (assoc final-response :occurrences parsed-occurrences))]
-        (log/log! {:level :debug :msg "Processed result" :data {:result result}})
-        result)
-      ;; For other operations, use normal combine-responses
-      (let [result (-> (nrepl/combine-responses responses)
-                       bencode-friendly-data)]
-        (log/log! {:level :debug :msg "Combined result" :data {:result result}})
-        result))))
-
-(defn find-function-callers 
-  "Find all functions that call the specified function"
-  [nrepl-client namespace-name function-name]
-  (let [project-root (System/getProperty "user.dir")
-        ;; Note: namespace loading will be added separately
-        _ nil
-        ;; Convert namespace to file path with multiple attempts
-        namespace-path (str/replace namespace-name #"\." "/")
-        namespace-path (str/replace namespace-path #"-" "_")
-        potential-paths [(str project-root "/src/" namespace-path ".clj")
-                        (str project-root "/src/main/clojure/" namespace-path ".clj")
-                        (str project-root "/" namespace-path ".clj")]
-        file-path (or (first (filter #(.exists (java.io.File. %)) potential-paths))
-                     (first potential-paths))
+  (try
+    (let [op (:op message)
+          responses (nrepl/message nrepl-client message)]
+      (cond
+        (= op "find-symbol")
+        ;; find-symbol returns multiple responses, combine them
+        (let [combined-results (mapcat :value responses)
+              final-result (first (filter #(contains? % :status) responses))]
+          (-> final-result
+              (assoc :value combined-results)
+              bencode-friendly-data))
         
-        response (send-nrepl-message nrepl-client
-                                     {:op "find-symbol"
-                                      :ns namespace-name
-                                      :name function-name
-                                      :file file-path
-                                      :line 1
-                                      :column 1
-                                      :dir project-root
-                                      :ignore-errors "true"
-                                      :serialization-format "edn"})]
-    (when (:occurrences response)
-      (->> (:occurrences response)
-           (map (fn [usage]
-                  {:file (:file usage)
-                   :line (:line-beg usage)
-                   :column (:col-beg usage)
-                   :match (:match usage)
-                   :name (:name usage)}))
-           (remove nil?)))))
+        :else
+        (-> (first responses)
+            bencode-friendly-data)))
+    (catch java.io.FileNotFoundException e
+      (log/log! {:level :warn :msg "File not found during nREPL operation" 
+                 :data {:op (:op message) :file (:file message) :error (.getMessage e)}})
+      {:error (str "File not found: " (:file message)) :status "error" :value []})
+    (catch Exception e
+      (log/log! {:level :error :msg "nREPL message failed" 
+                 :data {:op (:op message) :error (.getMessage e)}})
+      {:error (.getMessage e) :status "error" :value []})))
 
-(defn parse-function-calls 
-  "Parse function calls from Clojure code using simple regex approach"
-  [code]
-  (let [function-call-pattern #"\(([a-zA-Z][a-zA-Z0-9\-\*\+\!\?]*(?:/[a-zA-Z][a-zA-Z0-9\-\*\+\!\?]*)?)"
-        matches (re-seq function-call-pattern code)]
-    (->> matches
-         (map second)
-         (remove #(contains? #{"if" "when" "let" "defn" "def" "do" "try" "catch" "finally"} %))
-         distinct)))
+(defn is-external-namespace?
+  "Check if a namespace is external (not part of our project)"
+  [namespace-name]
+  (or (str/starts-with? namespace-name "clojure.")
+      (str/starts-with? namespace-name "java.")
+      (str/starts-with? namespace-name "javax.")
+      (str/starts-with? namespace-name "cljs.")
+      ;; Add common external library prefixes
+      (str/starts-with? namespace-name "ring.")
+      (str/starts-with? namespace-name "compojure.")
+      (str/starts-with? namespace-name "hiccup.")))
 
+(defn find-function-callers
+  "Find functions that call the specified function using refactor-nrepl"
+  [nrepl-client namespace-name function-name]
+  (let [symbol-str (str namespace-name "/" function-name)]
+    
+    ;; Check if this is an external namespace first
+    (if (is-external-namespace? namespace-name)
+      (do
+        (log/log! {:level :info :msg "Skipping external namespace for call hierarchy" 
+                   :data {:namespace namespace-name :symbol symbol-str}})
+        {:value [] 
+         :status "success"
+         :message (str "External namespace " namespace-name " - no project callers found")})
+      
+      ;; For project namespaces, try to find the file
+      (let [namespace-path (str/replace namespace-name "." "/")
+            namespace-path-underscores (str/replace namespace-name "-" "_")
+            file-paths [(str "src/" namespace-path ".clj")
+                       (str "src/" namespace-path-underscores ".clj") 
+                       (str "src/main/clojure/" namespace-path ".clj")
+                       (str namespace-path ".clj")
+                       ;; Handle the case where we might be in a different working directory
+                       (str "../src/" namespace-path ".clj")
+                       (str "./src/" namespace-path ".clj")]
+            ;; Find the first existing file instead of just using the first path
+            existing-file (first (filter #(-> % io/file .exists) file-paths))]
+        
+        ;; Only proceed if we found an actual file
+        (if existing-file
+          (do
+            (log/log! {:level :info :msg "Finding callers for function" 
+                       :data {:symbol symbol-str :file existing-file}})
+            
+            (send-nrepl-message nrepl-client 
+                               {:op "find-symbol"
+                                :ns namespace-name
+                                :sym function-name
+                                :file existing-file
+                                :line 1
+                                :column 1}))
+          (do
+            (log/log! {:level :info :msg "No source file found for namespace" 
+                       :data {:namespace namespace-name :symbol symbol-str :checked-paths file-paths}})
+            {:value [] 
+             :status "success"
+             :message (str "No source file found for namespace " namespace-name)}))))))
 
-(defn build-call-hierarchy 
-  "Build call hierarchy for a function in the specified direction"
-  [nrepl-client namespace-name function-name direction max-depth]
-  (letfn [(build-hierarchy [current-ns current-fn depth visited]
-            (if (or (>= depth max-depth)
-                    (contains? visited [current-ns current-fn]))
-              {:namespace current-ns
-               :function current-fn
-               :depth depth
-               :relations []}
-              (let [relations (case direction
-                                "callers" (find-function-callers nrepl-client current-ns current-fn)
-                                [])]
-                {:namespace current-ns
-                 :function current-fn
-                 :depth depth
-                 :relations (case direction
-                              "callers" relations
-                              [])})))]
-    (build-hierarchy namespace-name function-name 0 #{})))
+(defn build-call-hierarchy
+  "Build call hierarchy for a function"
+  [nrepl-client namespace-name function-name max-depth]
+  (try
+    (log/log! {:level :info :msg "Building call hierarchy" 
+               :data {:namespace namespace-name :function function-name :max-depth max-depth}})
+    
+    (let [result (find-function-callers nrepl-client namespace-name function-name)]
+      (if (:error result)
+        result
+        {:callers (:value result)
+         :function function-name
+         :namespace namespace-name
+         :depth 1 ;; Simplified - only 1 level for now
+         :status "success"}))
+    (catch Exception e
+      (log/log! {:level :error :msg "Call hierarchy failed" 
+                 :data {:error (.getMessage e)}})
+      {:error (.getMessage e) :status "error"})))
 
-(defn format-call-hierarchy 
-  "Format call hierarchy result for display"
-  [hierarchy direction]
-  (let [direction-desc (case direction
-                         "callers" "Functions that call"
-                         "unknown")
-        relations (:relations hierarchy)
-        relation-summary (if (seq relations)
-                          (str " - Found " (count relations) " " 
-                               "callers:" 
-                               " " (str/join ", " (map #(str (:file %) ":" (:line %)) relations)))
-                          " - No relations found")]
-    {:summary (str direction-desc " " (:namespace hierarchy) "/" (:function hierarchy) relation-summary)
-     :direction direction
-     :root-function {:namespace (:namespace hierarchy)
-                     :function (:function hierarchy)}
-     :relations relations
-     :hierarchy hierarchy
-     :analysis {:total-relations (count relations)
-                :max-depth (:depth hierarchy)}}))
-
-;; Enhanced Usage Finder Implementation
+(defn format-call-hierarchy
+  "Format call hierarchy results for display"
+  [hierarchy-result]
+  (if (:error hierarchy-result)
+    (str "Error: " (:error hierarchy-result))
+    (let [{:keys [callers function namespace]} hierarchy-result
+          caller-count (count callers)]
+      (if (zero? caller-count)
+        (str "No callers found for " namespace "/" function)
+        (str "Found " caller-count " caller(s) for " namespace "/" function ":\n"
+             (str/join "\n" (map (fn [caller]
+                                   (str "  " (or (:name caller) (:file caller) "Unknown")))
+                                 callers)))))))
 
 (defn ensure-namespace-loaded
-  "Ensure a namespace is loaded in the nREPL session"
+  "Ensure namespace is loaded in nREPL session"
   [nrepl-client namespace-name]
   (try
-    (log/log! {:level :debug :msg "Ensuring namespace is loaded" :data {:namespace namespace-name}})
-    (send-nrepl-message nrepl-client {:op "eval" :code (str "(require '" namespace-name ")")})
-    (log/log! {:level :debug :msg "Namespace loaded successfully" :data {:namespace namespace-name}})
+    (nrepl/message nrepl-client {:op "eval" :code (str "(require '" namespace-name ")")})
     true
     (catch Exception e
-      (log/log! {:level :warn :msg "Failed to load namespace" :data {:namespace namespace-name :error (.getMessage e)}})
+      (log/log! {:level :warn :msg "Failed to load namespace" 
+                 :data {:namespace namespace-name :error (.getMessage e)}})
       false)))
 
-(defn find-symbol-usages 
-  "Find all usages of a symbol across the project with enhanced context"
-  [nrepl-client namespace-name symbol-name _options]
+(defn find-symbol-usages
+  "Find usages of a symbol with enhanced error handling"
+  [nrepl-client namespace-name symbol-name include-context]
   (try
-    (log/log! {:level :info :msg "Starting find-symbol-usages" :data {:namespace namespace-name :symbol symbol-name}})
-    (let [project-root (System/getProperty "user.dir")
-          _ (log/log! {:level :debug :msg "Project root determined" :data {:project-root project-root}})
-          
-          ;; Ensure namespace is loaded for better info operations
-          _ (ensure-namespace-loaded nrepl-client namespace-name)
-          
-          ;; Convert namespace to file path with better error handling
-          namespace-path (str/replace namespace-name #"\." "/")
-          namespace-path (str/replace namespace-path #"-" "_")
-          ;; Try multiple common source paths for project namespaces
-          potential-paths [(str project-root "/src/" namespace-path ".clj")
-                          (str project-root "/src/main/clojure/" namespace-path ".clj")
-                          (str project-root "/" namespace-path ".clj")]
-          project-file-path (first (filter #(.exists (java.io.File. %)) potential-paths))
-          
-          is-external-namespace (nil? project-file-path)
-          _ (log/log! {:level :debug :msg "File path resolved" :data {:namespace namespace-name :file-path project-file-path :is-external is-external-namespace :attempted-paths potential-paths}})]
-          
-      (if is-external-namespace
-        ;; For external namespaces, return empty results instead of querying refactor-nrepl
-        ;; This avoids the NullPointerException in refactor-nrepl
-        (do
-          (log/log! {:level :debug :msg "Skipping external namespace" :data {:namespace namespace-name :reason "External namespaces not supported for usage search"}})
-          {:total-usages 0
-           :namespaces-with-usages []
-           :usages []})
+    ;; Check if this is an external namespace
+    (if (is-external-namespace? namespace-name)
+      {:usages []
+       :message (str "External namespace " namespace-name " - no usages found")
+       :symbol symbol-name
+       :namespace namespace-name
+       :status "success"}
+      
+      (let [namespace-path (str/replace namespace-name "." "/")
+            file-paths [(str "src/" namespace-path ".clj")
+                       (str "src/main/clojure/" namespace-path ".clj")
+                       (str namespace-path ".clj")]
+            existing-file (first (filter #(-> % io/file .exists) file-paths))]
         
-        ;; For project namespaces, proceed with refactor-nrepl
-        (let [;; Use refactor-nrepl's find-symbol for project namespaces only
-              find-symbol-params {:op "find-symbol"
-                                  :ns namespace-name
-                                  :name symbol-name
-                                  :file project-file-path
-                                  :line 1
-                                  :column 1
-                                  :dir project-root
-                                  :ignore-errors "true"
-                                  :serialization-format "edn"}
-              _ (log/log! {:level :debug :msg "find-symbol params" :data {:params find-symbol-params}})
-              response (send-nrepl-message nrepl-client find-symbol-params)
-              _ (log/log! {:level :debug :msg "find-symbol response" :data {:response response}})]
-          (if (:error response)
-            {:error (:error response) :usages []}
-            (let [usages (:occurrences response)]
-              {:total-usages (count usages)
-               :namespaces-with-usages (->> usages
-                                            (map :file)
-                                            (map #(when % (second (re-find #"([^/]+)\.clj$" %))))
-                                            (remove nil?)
-                                            distinct
-                                            sort)
-               :usages (->> usages
-                            (map (fn [usage]
-                                   {:file (:file usage)
-                                    :line (:line usage)
-                                    :column (:col usage)
-                                    :match (:match usage)
-                                    :context (:context usage)
-                                    :type (cond
-                                            (re-find #"^\s*\(" (:context usage "")) :function-call
-                                            (re-find #"^\s*\[" (:context usage "")) :binding
-                                            :else :reference)}))
-                            (sort-by (juxt :file :line)))})))))
+        ;; Only proceed if we found an actual file
+        (if existing-file
+          (do
+            ;; Ensure namespace is loaded
+            (ensure-namespace-loaded nrepl-client namespace-name)
+            
+            ;; Find symbol usages  
+            (let [symbol-str (str namespace-name "/" symbol-name)
+                  result (send-nrepl-message nrepl-client 
+                                           {:op "find-symbol"
+                                            :ns namespace-name
+                                            :sym symbol-name
+                                            :file existing-file
+                                            :line 1
+                                            :column 1})]
+              
+              (if (:error result)
+                result
+                {:usages (:value result)
+                 :symbol symbol-name
+                 :namespace namespace-name
+                 :include-context include-context
+                 :status "success"})))
+          {:usages []
+           :message (str "No source file found for namespace " namespace-name)
+           :symbol symbol-name
+           :namespace namespace-name
+           :status "success"})))
+    
     (catch Exception e
-      {:error (str "Failed to find usages: " (.getMessage e))
-       :usages []})))
+      (log/log! {:level :error :msg "Usage finding failed" 
+                 :data {:namespace namespace-name :symbol symbol-name :error (.getMessage e)}})
+      {:error (.getMessage e) :status "error"})))
 
-(defn categorize-usages 
-  "Categorize usages by type and location"
+(defn categorize-usages
+  "Categorize usages by type and file"
   [usages]
   (let [by-type (group-by :type usages)
         by-file (group-by :file usages)]
-    {:by-type {:function-calls (count (:function-call by-type))
-               :bindings (count (:binding by-type))
-               :references (count (:reference by-type))}
-     :by-file (->> by-file
-                   (map (fn [[file file-usages]]
-                          {:file file
-                           :usage-count (count file-usages)
-                           :lines (map :line file-usages)}))
-                   (sort-by :usage-count >))}))
+    {:by-type by-type
+     :by-file by-file
+     :total (count usages)}))
 
-(defn format-usage-analysis 
-  "Format the usage analysis results"
-  [symbol-name namespace-name usage-result]
-  (let [categorization (categorize-usages (:usages usage-result))]
-    {:summary (format "Found %d usages of %s/%s across %d namespaces"
-                      (:total-usages usage-result)
-                      namespace-name
-                      symbol-name
-                      (count (:namespaces-with-usages usage-result)))
-     :symbol {:namespace namespace-name :name symbol-name}
-     :statistics {:total-usages (:total-usages usage-result)
-                  :affected-namespaces (count (:namespaces-with-usages usage-result))
-                  :usage-types (:by-type categorization)}
-     :namespaces (:namespaces-with-usages usage-result)
-     :files-analysis (:by-file categorization)
-     :detailed-usages (:usages usage-result)}))
+(defn format-usage-analysis
+  "Format comprehensive usage analysis"
+  [usage-result]
+  (if (:error usage-result)
+    (str "Error: " (:error usage-result))
+    (let [{:keys [usages symbol namespace]} usage-result
+          analysis (categorize-usages usages)]
+      (if (zero? (:total analysis))
+        (str "No usages found for " namespace "/" symbol)
+        (str "Found " (:total analysis) " usage(s) for " namespace "/" symbol ":\n"
+             (str/join "\n" (map (fn [usage]
+                                   (str "  " (:file usage) " (line " (:line usage) ")"))
+                                 usages)))))))
 
-;; Register the call-hierarchy tool
-(register-tool! :call-hierarchy
-  "Analyze function call hierarchy (callers) in a Clojure project"
-  {:namespace {:type "string" :description "Namespace containing the function"}
-   :function {:type "string" :description "Function name to analyze"}
-   :direction {:type "string" :description "Direction: 'callers' (who calls this)" :enum ["callers"]}
-   :max-depth {:type "number" :description "Maximum depth to traverse (default: 3)" :default 3}}
-  (fn [tool-call context]
-    (let [{:strs [namespace function direction max-depth]} (:args tool-call)
-          nrepl-client (:nrepl-client context)
-          depth (or max-depth 3)]
-      (if nrepl-client
-        (try
-          (let [result (-> (build-call-hierarchy nrepl-client namespace function direction depth)
-                           (format-call-hierarchy direction))]
-            {:value (:summary result)
-             :status :success})
-          (catch Exception e
-            {:error (str "Failed to analyze call hierarchy: " (.getMessage e))
-             :status :error}))
-        {:error "nREPL client not available"
-         :status :error})))
-  :tags #{:navigation :analysis :code-understanding}
-  :dependencies #{:nrepl})
+;; ===============================================
+;; Tool Implementations
+;; ===============================================
 
-;; Register the enhanced usage-finder tool
-(register-tool! :usage-finder
-  "Find all usages of a symbol across the project with detailed analysis"
-  {:namespace {:type "string" :description "Namespace containing the symbol"}
-   :symbol {:type "string" :description "Symbol name to find usages for"}
-   :include-context {:type "boolean" :description "Include surrounding code context (default: true)" :default true}}
-  (fn [tool-call context]
-    (let [{:strs [namespace symbol include-context]} (:args tool-call)
-          nrepl-client (:nrepl-client context)
-          options {:include-context (not= include-context false)}]
-      (if nrepl-client
-        (try
-          (let [usage-result (find-symbol-usages nrepl-client namespace symbol options)]
-            (if (:error usage-result)
-              {:error (:error usage-result) :status :error}
-              (let [formatted-result (format-usage-analysis symbol namespace usage-result)]
-                {:value (:summary formatted-result)
-                 :status :success})))
-          (catch Exception e
-            {:error (str "Failed to find symbol usages: " (.getMessage e))
-             :status :error}))
-        {:error "nREPL client not available"
-         :status :error})))
-  :tags #{:navigation :search :code-understanding}
-  :dependencies #{:nrepl})
+(defn call-hierarchy-tool [mcp-context arguments]
+  (let [{:strs [namespace function direction max-depth]} arguments
+        nrepl-client (:nrepl-client mcp-context)
+        max-depth (or max-depth 3)]
+    (cond
+      (nil? nrepl-client)
+      {:content [{:type "text" 
+                  :text "Error: nREPL client not available. Call hierarchy requires an active nREPL connection."}]}
+      
+      (or (nil? namespace) (empty? namespace))
+      {:content [{:type "text" 
+                  :text "Error: namespace parameter is required"}]}
+      
+      (or (nil? function) (empty? function))
+      {:content [{:type "text" 
+                  :text "Error: function parameter is required"}]}
+      
+      (not= direction "callers")
+      {:content [{:type "text" 
+                  :text "Error: Only 'callers' direction is currently supported"}]}
+      
+      :else
+      (let [result (build-call-hierarchy nrepl-client (str namespace) (str function) max-depth)]
+        {:content [{:type "text" 
+                    :text (format-call-hierarchy result)}]}))))
+
+(defn usage-finder-tool [mcp-context arguments]
+  (let [{:strs [namespace symbol include-context]} arguments
+        nrepl-client (:nrepl-client mcp-context)
+        include-context (if (nil? include-context) true include-context)]
+    (cond
+      (nil? nrepl-client)
+      {:content [{:type "text" 
+                  :text "Error: nREPL client not available. Usage finder requires an active nREPL connection."}]}
+      
+      (or (nil? namespace) (empty? namespace))
+      {:content [{:type "text" 
+                  :text "Error: namespace parameter is required"}]}
+      
+      (or (nil? symbol) (empty? symbol))
+      {:content [{:type "text" 
+                  :text "Error: symbol parameter is required"}]}
+      
+      :else
+      (let [result (find-symbol-usages nrepl-client (str namespace) (str symbol) include-context)]
+        {:content [{:type "text" 
+                    :text (format-usage-analysis result)}]}))))
+
+;; ===============================================
+;; Tool Definitions
+;; ===============================================
+
+(def tools
+  "Navigation tool definitions for mcp-toolkit"
+  [{:name "call-hierarchy"
+    :description "Analyze function call hierarchy (callers) in a Clojure project"
+    :inputSchema {:type "object"
+                  :properties {:namespace {:type "string" :description "Namespace containing the function"}
+                              :function {:type "string" :description "Function name to analyze"}
+                              :direction {:type "string" :description "Direction: 'callers' (who calls this)" :enum ["callers"]}
+                              :max-depth {:type "number" :description "Maximum depth to traverse (default: 3)"}}
+                  :required ["namespace" "function"]}
+    :tool-fn call-hierarchy-tool}
+   
+   {:name "usage-finder"
+    :description "Find all usages of a symbol across the project with detailed analysis"
+    :inputSchema {:type "object"
+                  :properties {:namespace {:type "string" :description "Namespace containing the symbol"}
+                              :symbol {:type "string" :description "Symbol name to find usages for"}
+                              :include-context {:type "boolean" :description "Include surrounding code context (default: true)"}}
+                  :required ["namespace" "symbol"]}
+    :tool-fn usage-finder-tool}])

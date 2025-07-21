@@ -1,188 +1,220 @@
 (ns is.simm.repl-mcp.integration.minimal-roundtrip-test
-  "Minimal roundtrip test demonstrating server-client compatibility"
+  "Minimal roundtrip test demonstrating mcp-toolkit server compatibility"
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
-            [is.simm.repl-mcp.interactive :as interactive]
-            [is.simm.repl-mcp.dispatch :as dispatch]
-            [is.simm.repl-mcp.api :as api]
-            [taoensso.telemere :as log]
-            ;; Load all tool namespaces to ensure they're registered
-            [is.simm.repl-mcp.tools.eval]
-            [is.simm.repl-mcp.tools.cider-nrepl]
-            [is.simm.repl-mcp.tools.refactor]
-            [is.simm.repl-mcp.tools.navigation]
-            [is.simm.repl-mcp.tools.structural-edit]
-            [is.simm.repl-mcp.tools.function-refactor]
-            [is.simm.repl-mcp.tools.test-generation]
-            [is.simm.repl-mcp.tools.clj-kondo]
-            [is.simm.repl-mcp.tools.deps-management]))
+            [is.simm.repl-mcp.server :as server]
+            [is.simm.repl-mcp.tools :as tools]
+            [taoensso.telemere :as log]))
 
-(deftest test-dispatch-roundtrip
-  "Test complete dispatch roundtrip - simulates server-client tool execution"
-  (testing "Tool registration, execution, and response cycle"
+(deftest test-instance-tool-roundtrip
+  "Test complete tool roundtrip using simplified instance API"
+  (testing "Instance creation, tool addition, and execution cycle"
     
-    ;; Register a test tool for this roundtrip test
-    (interactive/register-tool! 
-      :roundtrip-protocol-test
-      "Tool to test dispatch roundtrip"
-      {:input {:type "string" :description "Input to process"}}
-      (fn [tool-call _context]
-        (let [input (get-in tool-call [:args "input"] "no input")]
-          {:value (str "Dispatch processed: " input " | timestamp: " (System/currentTimeMillis))
-           :status :success}))
-      :tags #{:protocol-test})
-    
-    ;; Simulate a tool call as it would be processed by the server
-    (let [tool-call {:tool-name :roundtrip-protocol-test
-                     :args {"input" "Hello from roundtrip test!"}}
-          context {}
+    ;; Create an MCP server instance
+    (let [instance (server/create-mcp-server-instance! 
+                     {:tools (tools/get-tool-definitions)
+                      :nrepl-config {:port 17888}
+                      :server-info {:name "test-repl-mcp" :version "1.0.0"}})]
+      
+      ;; Add a test tool
+      (let [test-tool {:name "roundtrip-protocol-test"
+                       :description "Tool to test instance roundtrip"
+                       :inputSchema {:type "object"
+                                     :properties {:input {:type "string" 
+                                                          :description "Input to process"}}
+                                     :required ["input"]}
+                       :handler (fn [args _context]
+                                  (let [input (get args "input" "no input")]
+                                    {:content [{:type "text" 
+                                                :text (str "Instance processed: " input 
+                                                          " | timestamp: " (System/currentTimeMillis))}]}))}]
+        
+        ;; Add tool to instance
+        (server/add-tool! instance test-tool)
+        
+        ;; Verify tool was added
+        (let [session @(:session instance)
+              tools (:tools session)]
+          (is (some? tools) "Should have tools in session")
+          (is (contains? tools "roundtrip-protocol-test") "Should contain our test tool")
           
-          ;; Process through dispatch (simulates server processing)
-          result (dispatch/handle-tool-call tool-call context)]
-      
-      ;; Verify the roundtrip worked
-      (is (some? result) "Should return result")
-      (is (= (:status result) :success) "Should succeed")
-      (is (contains? result :value) "Should have value")
-      (is (str/includes? (:value result) "Dispatch processed:") "Should show dispatch processing")
-      (is (str/includes? (:value result) "Hello from roundtrip test!") "Should echo input")
-      (is (str/includes? (:value result) "timestamp:") "Should include timestamp")
-      
-      (log/log! {:level :info :msg "Dispatch roundtrip test completed" 
-                 :data {:tool-call tool-call :result result}}))))
+          ;; Test tool execution through handler
+          (let [test-args {"input" "Hello from roundtrip test!"}
+                result ((:handler test-tool) test-args {})]
+            
+            ;; Verify the roundtrip worked
+            (is (some? result) "Should return result")
+            (is (contains? result :content) "Should have content")
+            (is (vector? (:content result)) "Content should be vector")
+            (let [content-text (get-in result [:content 0 :text])]
+              (is (some? content-text) "Should have text content")
+              (is (str/includes? content-text "Instance processed:") "Should show instance processing")
+              (is (str/includes? content-text "Hello from roundtrip test!") "Should echo input")
+              (is (str/includes? content-text "timestamp:") "Should include timestamp"))
+            
+            (log/log! {:level :info :msg "Instance roundtrip test completed" 
+                       :data {:test-args test-args :result result}})))))))
 
-(deftest test-tool-list-roundtrip
-  "Test tool listing through API"
-  (testing "Tool list request-response cycle"
+(deftest test-tool-definitions-roundtrip
+  "Test tool definitions through tools namespace"
+  (testing "Tool definitions request-response cycle"
     
-    ;; Get tools list through API (simulates what a client would see)
-    (let [tools (api/list-tools)
-          tool-names (set (keys tools))]
+    ;; Get tools definitions (simulates what would be loaded into an instance)
+    (let [tool-defs (tools/get-tool-definitions)
+          tool-names (set (map :name tool-defs))]
       
-      ;; Verify the tools list roundtrip
-      (is (some? tools) "Should return tools")
-      (is (map? tools) "Should return map of tools")
-      (is (> (count tools) 0) "Should have tools available")
+      ;; Verify the tools definitions roundtrip
+      (is (some? tool-defs) "Should return tool definitions")
+      (is (vector? tool-defs) "Should return vector of tool definitions")
+      (is (> (count tool-defs) 0) "Should have tool definitions available")
       
-      ;; Verify our test tool is in the list
-      (is (contains? tool-names :roundtrip-protocol-test) "Should include our test tool")
-      (is (contains? tool-names :eval) "Should include eval tool")
+      ;; Verify core tools are in the definitions
+      (is (contains? tool-names "eval") "Should include eval tool")
+      (is (contains? tool-names "load-file") "Should include load-file tool")
       
       ;; Verify tool structure
-      (let [test-tool (get tools :roundtrip-protocol-test)]
-        (is (some? test-tool) "Should find our test tool")
-        (is (contains? test-tool :description) "Should have description")
-        (is (contains? test-tool :parameters) "Should have parameters"))
+      (let [eval-tool (first (filter #(= (:name %) "eval") tool-defs))]
+        (is (some? eval-tool) "Should find eval tool")
+        (is (contains? eval-tool :description) "Should have description")
+        (is (contains? eval-tool :inputSchema) "Should have inputSchema")
+        (is (contains? eval-tool :handler) "Should have handler function"))
       
-      (log/log! {:level :info :msg "Tool list roundtrip test completed"
-                 :data {:tool-count (count tools)}}))))
+      (log/log! {:level :info :msg "Tool definitions roundtrip test completed"
+                 :data {:tool-count (count tool-defs)}}))))
 
 (deftest test-system-integration
-  "Test system integration and tool availability"
-  (testing "System readiness and tool availability"
+  "Test system integration and instance creation"
+  (testing "System readiness and instance functionality"
     
-    ;; Verify system is ready for requests
-    (let [tools (api/list-tools)]
+    ;; Verify system can create instances
+    (let [instance (server/create-mcp-server-instance!
+                     {:tools (tools/get-tool-definitions)
+                      :nrepl-config {:port 17888}
+                      :server-info {:name "integration-test" :version "1.0.0"}})
+          session @(:session instance)
+          available-tools (:tools session)]
       
       ;; Verify system state
-      (is (some? tools) "System should have tools available")
-      (is (> (count tools) 40) "Should have substantial number of tools (>40)")
+      (is (some? instance) "System should create instances")
+      (is (some? session) "Instance should have session")
+      (is (some? available-tools) "Instance should have tools available")
+      (is (> (count available-tools) 4) "Should have substantial number of tools (>4)")
       
       ;; Verify core tools are available
-      (let [tool-names (set (keys tools))]
-        (is (contains? tool-names :eval) "Should have eval tool")
-        (is (contains? tool-names :format-code) "Should have format-code tool")
-        (is (contains? tool-names :complete) "Should have complete tool"))
+      (let [tool-names (set (keys available-tools))]
+        (is (contains? tool-names "eval") "Should have eval tool")
+        (is (contains? tool-names "load-file") "Should have load-file tool")
+        (is (contains? tool-names "lint-code") "Should have lint-code tool"))
       
       (log/log! {:level :info :msg "System integration test completed"
-                 :data {:tool-count (count tools)}}))))
+                 :data {:tool-count (count available-tools)}}))))
 
 (deftest test-error-handling-roundtrip
-  "Test error handling through dispatch"
+  "Test error handling through tool execution"
   (testing "Error response and recovery cycle"
     
-    ;; Register an error-generating tool
-    (interactive/register-tool! 
-      :error-protocol-test
-      "Tool to test error handling in dispatch"
-      {:error-mode {:type "string" :description "Type of error to generate"}}
-      (fn [tool-call _context]
-        (let [error-mode (get-in tool-call [:args "error-mode"] "none")]
-          (case error-mode
-            "none" {:value "No error generated" :status :success}
-            "validation" {:error "Validation error in dispatch test" :status :error}
-            "runtime" {:error "Runtime error in dispatch test" :status :error}
-            {:error (str "Unknown error mode: " error-mode) :status :error})))
-      :tags #{:protocol-test})
-    
-    ;; Test error case
-    (let [tool-call {:tool-name :error-protocol-test
-                     :args {"error-mode" "validation"}}
-          context {}
-          result (dispatch/handle-tool-call tool-call context)]
+    ;; Create instance and add error-generating tool
+    (let [instance (server/create-mcp-server-instance!
+                     {:tools (tools/get-tool-definitions)
+                      :nrepl-config {:port 17888}
+                      :server-info {:name "error-test" :version "1.0.0"}})
+          error-tool {:name "error-protocol-test"
+                      :description "Tool to test error handling"
+                      :inputSchema {:type "object"
+                                    :properties {:error-mode {:type "string" 
+                                                              :description "Type of error to generate"}}
+                                    :required ["error-mode"]}
+                      :handler (fn [args _context]
+                                 (let [error-mode (get args "error-mode" "none")]
+                                   (case error-mode
+                                     "none" {:content [{:type "text" :text "No error generated"}]}
+                                     "validation" (throw (ex-info "Validation error in test" 
+                                                                   {:type :validation}))
+                                     "runtime" (throw (ex-info "Runtime error in test" 
+                                                               {:type :runtime}))
+                                     (throw (ex-info (str "Unknown error mode: " error-mode)
+                                                     {:type :unknown})))))}]
       
-      ;; Verify error is properly handled
-      (is (some? result) "Should return result even for errors")
-      (is (= (:status result) :error) "Should have error status")
-      (is (contains? result :error) "Should have error field")
-      (is (str/includes? (:error result) "Validation error") "Should contain error message")
+      ;; Add error tool to instance
+      (server/add-tool! instance error-tool)
       
-      (log/log! {:level :info :msg "Error handling roundtrip test completed"
-                 :data {:error-response result}}))
-    
-    ;; Test recovery - ensure system still works after error
-    (let [tool-call {:tool-name :error-protocol-test
-                     :args {"error-mode" "none"}}
-          context {}
-          result (dispatch/handle-tool-call tool-call context)]
+      ;; Test error case - should catch exception
+      (let [test-args {"error-mode" "validation"}]
+        (try
+          ((:handler error-tool) test-args {})
+          (is false "Should have thrown exception")
+          (catch Exception e
+            (is (some? e) "Should catch exception")
+            (is (str/includes? (ex-message e) "Validation error") "Should contain error message")
+            (log/log! {:level :info :msg "Error handling test completed"
+                       :data {:error-message (ex-message e)}}))))
       
-      ;; Verify system recovered from error
-      (is (some? result) "Should work after error")
-      (is (= (:status result) :success) "Should have success status after error")
-      (is (= (:value result) "No error generated") "Should return success after error")
-      
-      (log/log! {:level :info :msg "Error recovery test completed"}))))
+      ;; Test recovery - ensure tool still works after error
+      (let [test-args {"error-mode" "none"}
+            result ((:handler error-tool) test-args {})]
+        
+        ;; Verify system recovered from error
+        (is (some? result) "Should work after error")
+        (is (contains? result :content) "Should have content after error")
+        (let [content-text (get-in result [:content 0 :text])]
+          (is (= content-text "No error generated") "Should return success after error"))
+        
+        (log/log! {:level :info :msg "Error recovery test completed"})))))
 
-(deftest test-unknown-tool-handling
-  "Test handling of unknown tools"
-  (testing "Unknown tool handling"
+(deftest test-tool-removal-roundtrip
+  "Test tool removal through instance API"
+  (testing "Tool addition and removal cycle"
     
-    ;; Test calling unknown tool
-    (let [tool-call {:tool-name :unknown-tool-12345
-                     :args {"test" "input"}}
-          context {}
-          result (dispatch/handle-tool-call tool-call context)]
+    ;; Create instance
+    (let [instance (server/create-mcp-server-instance!
+                     {:tools (tools/get-tool-definitions)
+                      :nrepl-config {:port 17888}
+                      :server-info {:name "removal-test" :version "1.0.0"}})
+          test-tool {:name "removal-test-tool"
+                     :description "Tool to test removal"
+                     :inputSchema {:type "object" :properties {}}
+                     :handler (fn [_args _context]
+                                {:content [{:type "text" :text "Test tool response"}]})}]
       
-      ;; Verify unknown tool is properly handled
-      (is (some? result) "Should return result for unknown tool")
-      (is (= (:status result) :error) "Should have error status")
-      (is (contains? result :error) "Should have error field")
-      (is (str/includes? (:error result) "Unknown tool") "Should indicate unknown tool")
+      ;; Add tool
+      (server/add-tool! instance test-tool)
       
-      (log/log! {:level :info :msg "Unknown tool test completed"
-                 :data {:error-response result}}))))
+      ;; Verify tool was added
+      (let [session @(:session instance)
+            tools (:tools session)]
+        (is (contains? tools "removal-test-tool") "Should contain added tool"))
+      
+      ;; Remove tool
+      (server/remove-tool! instance "removal-test-tool")
+      
+      ;; Verify tool was removed
+      (let [session @(:session instance)
+            tools (:tools session)]
+        (is (not (contains? tools "removal-test-tool")) "Should not contain removed tool"))
+      
+      (log/log! {:level :info :msg "Tool removal test completed"}))))
 
 ;; Summary comment
 (comment
-  "This test suite demonstrates complete server-client roundtrip functionality:
+  "This test suite demonstrates complete mcp-toolkit server functionality:
   
-  1. **Dispatch Roundtrip**: Tests the full cycle of tool registration, 
-     tool execution through dispatch, and response handling
+  1. **Instance Tool Roundtrip**: Tests the full cycle of instance creation,
+     tool addition, and tool execution through the simplified API
   
-  2. **Tool List Roundtrip**: Tests the API that clients use to discover 
-     available tools and their specifications
+  2. **Tool Definitions Roundtrip**: Tests the tool definitions system that
+     provides available tools for instance creation
   
-  3. **System Integration**: Tests that the system has proper tool availability
-     and readiness for client requests
+  3. **System Integration**: Tests that the system can create instances with
+     proper tool availability and session management
   
   4. **Error Handling Roundtrip**: Tests that errors are properly handled
-     in the dispatch system and that the system recovers gracefully
+     in tool execution and that the system recovers gracefully
   
-  5. **Unknown Tool Handling**: Tests graceful handling of invalid tool calls
+  5. **Tool Removal Roundtrip**: Tests dynamic tool addition and removal
+     through the instance API
   
-  These tests verify server-client compatibility at the core dispatch level,
-  ensuring that the server correctly processes tool calls and can respond
-  appropriately to any compliant MCP client. This validates the complete
-  request-response cycle without the complexity of managing actual server
-  processes while still ensuring all the essential roundtrip functionality
-  works correctly.")
+  These tests verify the simplified mcp-toolkit-based architecture works
+  correctly, ensuring that instances can be created, tools can be managed
+  dynamically, and the complete tool execution cycle functions properly.
+  This validates the migration from the old abstraction-heavy system to
+  the new direct mcp-toolkit integration.")

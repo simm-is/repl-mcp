@@ -1,35 +1,32 @@
 {:paths ["src" "resources"]
  :deps {org.clojure/clojure {:mvn/version "1.12.1"}
-        io.modelcontextprotocol.sdk/mcp {:mvn/version "0.10.0"}
+        ;; MCP toolkit - pure Clojure MCP implementation
+        fi.metosin/mcp-toolkit {:mvn/version "0.1.1-alpha"}
+        ;; Utility libraries
         com.rpl/specter {:mvn/version "1.1.4"}
         org.clojure/data.json {:mvn/version "2.4.0"}
         pogonos/pogonos {:mvn/version "0.2.1"}
-        ;; logging
-        com.taoensso/telemere {:mvn/version "1.0.1"}}
+        ;; Logging
+        com.taoensso/telemere {:mvn/version "1.0.1"}
+        ;; mcp-toolkit dependencies
+        funcool/promesa {:mvn/version "11.0.678"}
+        metosin/jsonista {:mvn/version "0.3.13"}
+        http-kit/http-kit {:mvn/version "2.9.0-alpha6"}
+        metosin/reitit {:mvn/version "0.9.1"}}
  :aliases
  {:repl-mcp {:main-opts ["-m" "is.simm.repl-mcp"]
-             :jvm-opts ["-Djdk.attach.allowAttachSelf"
-                        "-XX:+UnlockDiagnosticVMOptions"
-                        "-XX:+DebugNonSafepoints"
-                        "-XX:+EnableDynamicAgentLoading"
-                        "--enable-native-access=ALL-UNNAMED"]
+             :extra-paths ["test"]
              :extra-deps {nrepl/nrepl {:mvn/version "1.0.0"}
                           cider/cider-nrepl {:mvn/version "0.47.1"}
                           refactor-nrepl/refactor-nrepl {:mvn/version "3.10.0"}
+                          clj-kondo/clj-kondo {:mvn/version "2025.06.05"}
                           rewrite-clj/rewrite-clj {:mvn/version "1.1.47"}
                           dev.weavejester/cljfmt {:mvn/version "0.13.1"}
-                          clj-kondo/clj-kondo {:mvn/version "2025.06.05"}
-                          ;; Profiling dependencies (optional)
-                          criterium/criterium {:mvn/version "0.4.6"}
-                          com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.6.1"}
+
+                          org.clojure/tools.cli {:mvn/version "1.1.230"}
 
                           org.slf4j/slf4j-api {:mvn/version "2.0.17"}
-                          org.slf4j/slf4j-simple {:mvn/version "2.0.17"}
-                          #_#_org.slf4j/slf4j-nop {:mvn/version "2.0.17"}  ; No-operation SLF4J provider to suppress STDOUT
-                          ;; HTTP server dependencies for SSE transport
-                          org.eclipse.jetty.ee10/jetty-ee10-servlet {:mvn/version "12.0.5"}
-                          org.eclipse.jetty/jetty-server {:mvn/version "12.0.5"}
-                          jakarta.servlet/jakarta.servlet-api {:mvn/version "6.0.0"}}}
+                          org.slf4j/slf4j-simple {:mvn/version "2.0.17"}}}
   :build {:deps {io.github.clojure/tools.build
                  {:mvn/version "0.10.9"}}
           :ns-default build}
@@ -48,10 +45,6 @@
                       com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.6.1"}
 
                       org.slf4j/slf4j-api {:mvn/version "2.0.17"}
-                      org.slf4j/slf4j-nop {:mvn/version "2.0.17"}  ; No-operation SLF4J provider to suppress warnings
-                      ;; HTTP server dependencies for SSE transport
-                      org.eclipse.jetty.ee10/jetty-ee10-servlet {:mvn/version "12.0.5"}
-                      org.eclipse.jetty/jetty-server {:mvn/version "12.0.5"}
-                      jakarta.servlet/jakarta.servlet-api {:mvn/version "6.0.0"}}
+                      org.slf4j/slf4j-nop {:mvn/version "2.0.17"}}
          :main-opts ["-m" "cognitect.test-runner"]
          :exec-fn cognitect.test-runner.api/test}}}

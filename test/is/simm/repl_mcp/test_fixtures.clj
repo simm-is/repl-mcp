@@ -7,6 +7,9 @@
             [refactor-nrepl.middleware :refer [wrap-refactor]]
             [taoensso.telemere :as log]))
 
+;; Set telemere log level to error to reduce verbose test output
+(log/set-min-level! :error)
+
 (def test-nrepl-port 57999)  ; Use high port to avoid conflicts
 (def ^:dynamic *test-nrepl-server* nil)
 (def ^:dynamic *test-nrepl-client* nil)
@@ -107,3 +110,68 @@
     (test-nrepl-eval "(+ 1 1)")
     true
     (catch Exception _e false)))
+
+;; ===============================================
+;; Integration Test Helpers
+;; ===============================================
+
+(defn test-context
+  "Create a test context with the nREPL client"
+  []
+  {:nrepl-client *test-nrepl-client*})
+
+(defn test-context-with-opts
+  "Create a test context with additional options"
+  [opts]
+  (merge {:nrepl-client *test-nrepl-client*} opts))
+
+(defn test-tool-with-nrepl
+  "Helper to test a tool with real nREPL client.
+   Returns the tool result and performs basic validation."
+  [tool-def args & {:keys [expect-success expect-text expect-error context]
+                    :or {expect-success true context {}}}]
+  (let [tool-fn (:tool-fn tool-def)
+        test-context (merge (test-context) context)
+        result (tool-fn test-context args)]
+    
+    ;; Verify basic MCP structure
+    (assert (map? result) "Tool result should be a map")
+    (assert (contains? result :content) "Tool result should have :content")
+    (assert (vector? (:content result)) "Tool :content should be a vector")
+    (assert (seq (:content result)) "Tool :content should not be empty")
+    
+    (let [content-text (:text (first (:content result)))]
+      (assert (string? content-text) "Tool content text should be a string")
+      
+      ;; Check expectations
+      (when expect-text
+        (let [expected-texts (if (string? expect-text) [expect-text] expect-text)]
+          (assert (some #(clojure.string/includes? content-text %) expected-texts)
+                  (str "Expected text not found in: " content-text))))
+      
+      (when expect-error
+        (assert (clojure.string/includes? content-text "Error")
+                (str "Expected error message. Got: " content-text)))
+      
+      (when expect-success
+        (assert (not (clojure.string/includes? content-text "Error"))
+                (str "Unexpected error in successful test. Got: " content-text)))
+      
+      result)))
+
+(defn find-tool-by-name
+  "Find a tool definition by name"
+  [tools tool-name]
+  (first (filter #(= (:name %) tool-name) tools)))
+
+(defn wait-for-nrepl-warmup
+  "Wait for nREPL to be warmed up and ready"
+  []
+  (when *test-nrepl-client*
+    (try
+      ;; Simple warmup evaluation
+      (nrepl/message *test-nrepl-client* {:op "eval" :code "(+ 1 1)"})
+      (Thread/sleep 100)
+      (catch Exception e
+        (log/log! {:level :warn :msg "nREPL warmup failed" 
+                   :data {:error (.getMessage e)}})))))
