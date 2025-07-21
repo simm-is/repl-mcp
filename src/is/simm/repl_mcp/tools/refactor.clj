@@ -174,6 +174,10 @@
     (when (nil? nrepl-client)
       (throw (Exception. "nREPL client is nil")))
     
+    ;; Validate that the file exists
+    (when-not (.exists (java.io.File. file-path))
+      (throw (Exception. (str "File does not exist: " file-path))))
+    
     (let [responses (nrepl/message nrepl-client 
                                   {:op "find-used-locals" 
                                    :file file-path
@@ -217,9 +221,17 @@
       {:content [{:type "text" 
                   :text "Error: nREPL client not available. Namespace cleaning requires an active nREPL connection."}]}
       (try
-        (let [result (clean-namespace nrepl-client file-path 
-                                    :prune-unused prune-unused 
-                                    :prefer-prefix prefer-prefix)]
+        (let [parsed-prune (cond
+                              (string? prune-unused) (Boolean/parseBoolean prune-unused)
+                              (nil? prune-unused) true
+                              :else (boolean prune-unused))
+              parsed-prefix (cond
+                              (string? prefer-prefix) (Boolean/parseBoolean prefer-prefix)
+                              (nil? prefer-prefix) true
+                              :else (boolean prefer-prefix))
+              result (clean-namespace nrepl-client file-path 
+                                    :prune-unused parsed-prune
+                                    :prefer-prefix parsed-prefix)]
           {:content [{:type "text" 
                       :text (if (= (:status result) :success)
                               (str (:value result))

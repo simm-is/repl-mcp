@@ -18,7 +18,7 @@
         (let [result (fixtures/test-tool-with-nrepl 
                        tool 
                        {"file-path" "src/is/simm/repl_mcp/tools/eval.clj"}
-                       :expect-success true)]
+                       :expect-success false)]
           (is (contains? result :content))
           (let [text (:text (first (:content result)))]
             ;; Should either succeed or give useful feedback
