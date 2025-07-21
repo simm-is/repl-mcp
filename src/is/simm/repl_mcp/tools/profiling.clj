@@ -163,7 +163,7 @@
 
 (defn profile-cpu-tool [mcp-context arguments]
   (try
-    (let [{:keys [code duration generate-flamegraph namespace top-k]} arguments
+    (let [{:strs [code duration generate-flamegraph namespace top-k]} arguments
           nrepl-client (:nrepl-client mcp-context)]
       (log/log! {:level :info :msg "CPU profiling tool called"
                  :data {:code code :duration duration}})
@@ -191,7 +191,7 @@
 
 (defn profile-alloc-tool [mcp-context arguments]
   (try
-    (let [{:keys [code duration generate-flamegraph namespace top-k]} arguments
+    (let [{:strs [code duration generate-flamegraph namespace top-k]} arguments
           nrepl-client (:nrepl-client mcp-context)]
       (log/log! {:level :info :msg "Allocation profiling tool called"
                  :data {:code code :duration duration}})

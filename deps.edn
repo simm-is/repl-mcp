@@ -22,6 +22,9 @@
                           clj-kondo/clj-kondo {:mvn/version "2025.06.05"}
                           rewrite-clj/rewrite-clj {:mvn/version "1.1.47"}
                           dev.weavejester/cljfmt {:mvn/version "0.13.1"}
+                          ;; Performance analysis dependencies
+                          criterium/criterium {:mvn/version "0.4.6"}
+                          com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.6.1"}
 
                           org.clojure/tools.cli {:mvn/version "1.1.230"}
 

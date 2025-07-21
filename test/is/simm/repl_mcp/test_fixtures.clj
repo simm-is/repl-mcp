@@ -171,6 +171,15 @@
     (try
       ;; Simple warmup evaluation
       (nrepl/message *test-nrepl-client* {:op "eval" :code "(+ 1 1)"})
+      ;; Try to add clj-async-profiler if it's not available
+      (let [check-result (nrepl/message *test-nrepl-client* 
+                                       {:op "eval" 
+                                        :code "(try (require 'clj-async-profiler.core) :available (catch Exception e :not-available))"})]
+        (when (= ":not-available" (-> check-result first :value))
+          (log/log! {:level :info :msg "Adding clj-async-profiler to test nREPL session"})
+          (nrepl/message *test-nrepl-client* 
+                        {:op "eval" 
+                         :code "(when *repl* (add-lib 'com.clojure-goes-fast/clj-async-profiler {:mvn/version \"1.6.1\"}))"})))
       (Thread/sleep 100)
       (catch Exception e
         (log/log! {:level :warn :msg "nREPL warmup failed" 
