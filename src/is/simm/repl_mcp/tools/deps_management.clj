@@ -34,27 +34,29 @@
     (log/log! {:level :info :msg "Adding libraries to REPL" 
                :data {:coords lib-coords}})
     
-    ;; Check if we're in a REPL context
-    (when-not *repl*
-      (throw (ex-info "add-libs only works in REPL context" {})))
-    
-    ;; Get the add-libs function
-    (let [add-libs-fn (requiring-resolve 'clojure.repl.deps/add-libs)
-          parsed-coords (parse-lib-coords lib-coords)]
+    ;; Parse coordinates first to validate them
+    (let [parsed-coords (parse-lib-coords lib-coords)]
+      
+      ;; Check if we're in a REPL context
+      (when-not *repl*
+        (throw (ex-info "add-libs only works in REPL context" {})))
+      
+      ;; Get the add-libs function  
+      (let [add-libs-fn (requiring-resolve 'clojure.repl.deps/add-libs)]
       
       (when-not add-libs-fn
         (throw (ex-info "add-libs not available - requires Clojure 1.12+" {})))
-      
-      ;; Call add-libs
-      (add-libs-fn parsed-coords)
-      
-      (log/log! {:level :info :msg "Libraries added successfully" 
-                 :data {:coords parsed-coords}})
-      
-      {:libraries (vec (keys parsed-coords))
-       :coordinates parsed-coords
-       :message "Libraries added successfully to REPL classpath"
-       :status :success})
+        
+        ;; Call add-libs
+        (add-libs-fn parsed-coords)
+        
+        (log/log! {:level :info :msg "Libraries added successfully" 
+                   :data {:coords parsed-coords}})
+        
+        {:libraries (vec (keys parsed-coords))
+         :coordinates parsed-coords
+         :message "Libraries added successfully to REPL classpath"
+         :status :success}))
     
     (catch Exception e
       (log/log! {:level :error :msg "Error adding libraries" 
@@ -132,9 +134,12 @@
                   :text (if (= (:status result) :success)
                           (str (:message result) "\n\nAdded libraries: " 
                                (str/join ", " (map str (:libraries result))))
-                          (str "Note: " (:error result) 
-                               "\n\nIn test environments, add-libs requires a true REPL context. "
-                               "This tool works in production when connected to a running REPL."))}]})))
+                          (let [error-msg (:error result)]
+                            (if (str/includes? error-msg "REPL context")
+                              (str "Note: " error-msg 
+                                   "\n\nIn test environments, add-libs requires a true REPL context. "
+                                   "This tool works in production when connected to a running REPL.")
+                              (str "Error: " error-msg))))}]})))
 
 (defn sync-deps-tool [mcp-context arguments]
   (log/log! {:level :info :msg "sync-deps tool called"})

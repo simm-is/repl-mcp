@@ -207,7 +207,7 @@
 ;; ===============================================
 
 (defn find-function-definition-tool [mcp-context arguments]
-  (let [{:keys [file-path function-name]} arguments]
+  (let [{:strs [file-path function-name]} arguments]
     (cond
       (or (nil? file-path) (empty? file-path))
       {:content [{:type "text" :text "Error: file-path parameter is required"}]}
@@ -224,7 +224,7 @@
                             (str "Error: " (:error result)))}]}))))
 
 (defn rename-function-in-file-tool [mcp-context arguments]
-  (let [{:keys [file-path old-name new-name]} arguments]
+  (let [{:strs [file-path old-name new-name]} arguments]
     (cond
       (or (nil? file-path) (empty? file-path))
       {:content [{:type "text" :text "Error: file-path parameter is required"}]}
@@ -244,7 +244,7 @@
                             (str "Error: " (:error result)))}]}))))
 
 (defn find-function-usages-in-project-tool [mcp-context arguments]
-  (let [{:keys [project-root function-name]} arguments
+  (let [{:strs [project-root function-name]} arguments
         nrepl-client (:nrepl-client mcp-context)]
     (cond
       (nil? nrepl-client)
@@ -268,7 +268,7 @@
                             (str "Error: " (:error result)))}]}))))
 
 (defn rename-function-across-project-tool [mcp-context arguments]
-  (let [{:keys [project-root old-name new-name]} arguments
+  (let [{:strs [project-root old-name new-name]} arguments
         nrepl-client (:nrepl-client mcp-context)]
     (cond
       (nil? nrepl-client)
@@ -295,7 +295,7 @@
                             (str "Error: " (:error result)))}]}))))
 
 (defn replace-function-definition-tool [mcp-context arguments]
-  (let [{:keys [file-path function-name new-implementation]} arguments]
+  (let [{:strs [file-path function-name new-implementation]} arguments]
     (cond
       (or (nil? file-path) (empty? file-path))
       {:content [{:type "text" :text "Error: file-path parameter is required"}]}
