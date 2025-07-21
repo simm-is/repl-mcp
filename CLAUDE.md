@@ -2,255 +2,269 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Overview
+
+This MCP server is built on [mcp-toolkit](https://github.com/metosin/mcp-toolkit) providing a clean, simplified architecture with minimal dependencies. All 51 tools follow consistent patterns for reliability and ease of use.
+
 ## Instructions
 
-1. Use the interactive Clojure development tools provided through MCP in preference to your default text editing tools and system calls. `setup-clj-kondo` to optionally get linting support. To add dependencies on the fly you can use `add-libs` and `sync-libs`.
-2. In particular use the `eval` MCP call to draft and test code before adding it to the project. Grow the code until you are confident it is behaving as intended. Use `lint-code` if available to spot problems early.
-3. If you need to add new code you can use your normal `Edit` tool to add code, and then use the `load-file` to load the changed file and optionally use namespace to reset namespaces if needed. Use `lint-project` if available to check the new code is conform.
-4. If you need to refactor code prefer to use the structural editing tools to avoid breaking parentheses and existing bindings.
-5. For bigger chunks of functionality draft a test case to cover important invariants of the code you have established. For new functionality you can add it with the `tdd-workflow` prompt template.
-6. For debugging, use your expertise first - if the issue is obvious, fix it directly. Use the `debug-function` prompt for complex/unfamiliar issues or when systematic investigation is needed.
-7. If structural editing tools malfunction, fall back to regular Edit tool and reload with `load-file`.
+1. **Interactive Development**: Use the MCP tools for Clojure development in preference to default text editing. Start with `eval` to test code interactively before committing changes.
+2. **Code Quality**: Use `lint-code` for immediate feedback during development, `lint-project` for comprehensive checks, and `setup-clj-kondo` to initialize linting in new projects.
+3. **File Management**: When adding new code, use the standard `Edit` tool followed by `load-file` to reload changes into the REPL. This maintains REPL state while updating code.
+4. **Refactoring**: Use structural editing tools for complex refactoring to maintain code integrity. Fall back to `Edit` + `load-file` if issues arise.
+5. **Testing**: Use `create-test-skeleton` for comprehensive test generation, `test-all` for full test runs, and `test-var-query` for targeted testing.
+6. **Debugging**: Apply direct fixes for obvious issues. For complex problems, use systematic investigation with appropriate tools.
+7. **Dependencies**: Use `add-libs` for runtime dependency addition (Clojure 1.12+), `sync-deps` after updating deps.edn, and `check-namespace` to verify availability.
 
 ### Workflow Philosophy
 
-**Balance efficiency with thoroughness**: Use your expertise and pattern recognition first, then fall back to structured workflows when needed.
+**Simple, Direct, Effective**: The mcp-toolkit foundation enables straightforward tool usage with consistent patterns and reliable error handling.
 
-**When to use direct approaches:**
-- Obvious bugs (wrong operators, typos, clear logic errors)
-- Familiar code patterns and domains
-- Time-critical situations
-- Simple, isolated functions
+**Tool Selection Principles:**
+- Use the most direct tool for the task
+- All tools follow the same pattern: input → processing → structured output
+- Error handling is built-in - tools return clear error messages
+- No complex state management - each tool call is independent
 
-**When to use structured workflows (prompts):**
-- Complex, unfamiliar codebases
-- When stuck or unsure of approach
-- Learning/teaching scenarios
-- Critical systems requiring audit trails
-- Team environments needing consistent practices
+### Tool Categories
 
-### Tool Selection Guide
+**Evaluation (2 tools)**
+- `eval` - Execute code in REPL with proper namespace context
+- `load-file` - Load files to update REPL state
 
-- **Code development/testing**: Use `eval` for interactive development
-- **Simple file edits**: Use `Edit` tool for straightforward additions
-- **Complex refactoring**: Use `structural-*` tools for sophisticated code transformations
-- **File reloading**: Use `load-file` after making changes
-- **Code quality/linting**: Use `lint-code` for real-time feedback, `lint-project` for codebase analysis
-- **Dependency management**: Use `add-libs` for runtime dependencies, `sync-deps` for project sync, `check-namespace` for availability
-- **Code navigation**: Use `call-hierarchy` for function relationship analysis, `usage-finder` for comprehensive symbol usage analysis
-- **Debugging**: 
-  - **Quick fixes**: Use direct approach for obvious issues (wrong operators, typos, clear logic errors)
-  - **Systematic investigation**: Use `debug-function` prompt for complex bugs, unfamiliar code, or when stuck
-  - **Learning/teaching**: Use structured workflows to demonstrate debugging techniques
+**Refactoring (11 tools)**
+- `clean-ns` - Organize imports and namespaces
+- `rename-function-*` - Rename across files or projects
+- `extract-function` - Extract code into new functions
+- `find-symbol` - Locate symbol definitions and usages
+
+**Navigation & Analysis (14 tools)**
+- `call-hierarchy` - Trace function relationships
+- `usage-finder` - Find all usages with context
+- `ns-vars`, `ns-list` - Explore namespaces
+- `info`, `eldoc` - Get documentation
+
+**Testing (3 tools)**
+- `create-test-skeleton` - Generate test templates
+- `test-all` - Run entire test suite
+- `test-var-query` - Run specific tests
+
+**Structural Editing (10 tools)**
+- Session-based editing with zipper navigation
+- Safe code transformations preserving structure
+
+**Performance (2 tools)**
+- `profile-cpu` - CPU usage analysis with flamegraphs
+- `profile-alloc` - Memory allocation profiling
+
+**Code Quality (3 tools)**
+- `lint-code` - Check code strings
+- `lint-project` - Analyze entire codebases
+- `setup-clj-kondo` - Initialize linting
+
+**Dependencies (3 tools)**
+- `add-libs` - Hot-load dependencies
+- `sync-deps` - Sync from deps.edn
+- `check-namespace` - Verify availability
 
 ### Code Quality Workflow
 
-**Static Analysis Integration**: The server includes comprehensive clj-kondo integration for real-time code quality feedback.
+**Integrated Linting**: clj-kondo provides real-time feedback with zero configuration required.
 
-**Available Tools:**
-- **`lint-code`**: Lint code strings during interactive development
-- **`lint-project`**: Analyze entire directories or projects for issues  
-- **`setup-clj-kondo`**: Initialize or update project linting configuration
+**Quick Start:**
+1. Run `setup-clj-kondo` once per project to initialize
+2. Use `lint-code` during development for immediate feedback
+3. Run `lint-project` before commits for comprehensive checks
 
-**Workflow Integration Patterns:**
+**Key Features:**
+- Automatic config detection from `.clj-kondo/config.edn`
+- Library-specific rules via `copy-configs: true`
+- Clear error/warning distinction
+- Fast performance even on large codebases
 
-1. **Interactive Development**: Use `lint-code` after `eval` to catch quality issues early
-2. **Pre-commit Checks**: Run `lint-project` on modified files before committing
-3. **Refactoring Validation**: Use linting after structural editing to ensure code quality
-4. **Project Setup**: Run `setup-clj-kondo` when adding the MCP server to new projects or when dependencies change
+### Dependency Management
 
-**Configuration Management:**
-- Project-specific rules are automatically loaded from `.clj-kondo/config.edn`
-- Custom configurations can be passed per-invocation for specific use cases
-- Use `setup-clj-kondo` with `copy-configs: true` to import library-specific linting rules
+**Hot-loading Support**: Add dependencies without restarting your REPL (Clojure 1.12+).
 
-**Quality Gates:**
-- Code strings with syntax errors return `isError: true`
-- Unused bindings, imports, and variables are flagged as warnings
-- Namespace mismatches and structural issues are detected
-- Custom severity levels can be configured per linter rule
-
-### Dependency Management Workflow
-
-**Runtime Dependency Addition**: The server includes Clojure 1.12+ integration for hot-loading dependencies without REPL restart.
-
-**Available Tools:**
-- **`add-libs`**: Add new libraries to the running REPL classpath
-- **`sync-deps`**: Synchronize dependencies from deps.edn that aren't yet loaded
-- **`check-namespace`**: Verify if a namespace/library is available on the classpath
-
-**Workflow Integration Patterns:**
-
-1. **Interactive Development**: Use `add-libs` to try new libraries during development
-2. **Project Synchronization**: Use `sync-deps` after updating deps.edn to load new dependencies
-3. **Dependency Verification**: Use `check-namespace` to confirm library availability before use
-4. **Hot Development**: Add dependencies without losing REPL state or stopping development
-
-**Usage Requirements:**
-- Requires Clojure 1.12+ for add-libs functionality
-- Only works in REPL context (requires `*repl*` to be true)
-- Dependencies must be available in Maven repositories
-- Project must be using tools.deps (deps.edn) for dependency management
-
-### Advanced Navigation Workflow
-
-**Semantic Code Navigation**: The server includes advanced navigation tools using refactor-nrepl and AST analysis for comprehensive code understanding.
-
-**Available Tools:**
-- **`call-hierarchy`**: Analyze function call relationships and dependencies
-- **`usage-finder`**: Find all usages of symbols across the project with detailed context
-
-**Workflow Integration Patterns:**
-
-1. **Code Understanding**: Use `call-hierarchy` to understand function dependencies and call relationships
-2. **Refactoring Preparation**: Use `usage-finder` to identify all symbol usages before making changes
-3. **Impact Analysis**: Combine both tools to understand the full scope of changes before refactoring
-4. **Codebase Exploration**: Use navigation tools to understand unfamiliar code sections
-
-**Navigation Features:**
-- **AST-based Analysis**: Uses refactor-nrepl's semantic analysis for accurate results
-- **Context-aware Search**: Distinguishes between different usage types (function calls, bindings, references)
-- **Cross-project Analysis**: Handles both project namespaces and external dependencies intelligently
-- **Performance Optimized**: Efficient handling of large codebases with intelligent filtering
-
-**Usage Requirements:**
-- Active nREPL session with refactor-nrepl middleware loaded
-- Project must be loaded in the nREPL for optimal symbol resolution
-- Works best with project namespaces (external namespace support is limited)
-
-### Performance Analysis Workflow
-
-**Critical Rule: Always warm up JIT with criterium before profiling CPU-bound code**
-
-**Workflow:**
-1. **JIT Warmup**: Use `(criterium.core/quick-bench my-function)` first
-2. **Profile**: Then use `profile-cpu` or `profile-alloc` for representative results
-
-**Tools:**
-- **`eval`**: 2-minute timeout allows criterium to complete warmup cycles
-- **`profile-cpu`**: CPU profiling with `:duration` parameter (default 5000ms)  
-- **`profile-alloc`**: Memory allocation profiling with `:duration` parameter
-- **Criterium**: Statistical benchmarking via eval tool
-
-**Example:**
+**Simple Workflow:**
 ```clojure
-;; 1. Warm up JIT first
-(criterium.core/quick-bench (compute-heavy-function data))
-;; 2. Now profile for accurate results with the MCP tool similar to: 
-(profile-cpu "(compute-heavy-function data)" :duration 5000)
+;; Check if library is available
+check-namespace: "hiccup.core"
+
+;; Add new dependency
+add-libs: {hiccup/hiccup {:mvn/version "1.0.5"}}
+
+;; Sync after editing deps.edn
+sync-deps
 ```
+
+**Requirements:**
+- Clojure 1.12+ for `add-libs`
+- Maven/Clojars availability
+- tools.deps project structure
+
+### Navigation & Analysis
+
+**Smart Navigation**: AST-based analysis provides accurate code understanding.
+
+**Key Tools:**
+- `call-hierarchy` - Who calls this function?
+- `usage-finder` - Where is this symbol used?
+- `find-function-definition` - Jump to definition
+- `find-symbol` - Locate symbol at position
+
+**Usage Example:**
+```clojure
+;; Find all callers of a function
+call-hierarchy:
+  namespace: "myapp.core"
+  function: "process-data"
+
+;; Find all usages with context
+usage-finder:
+  namespace: "myapp.core" 
+  symbol: "config"
+  include-context: true
+```
+
+### Performance Profiling
+
+**Integrated Profiling**: Built-in CPU and memory profiling with clj-async-profiler.
+
+**Simple Usage:**
+```clojure
+;; Profile CPU usage
+profile-cpu:
+  code: "(reduce + (range 1000000))"
+  duration: 5000
+  generate-flamegraph: true
+
+;; Profile memory allocations  
+profile-alloc:
+  code: "(repeatedly 1000 #(vec (range 100)))"
+  duration: 3000
+```
+
+**Tips:**
+- Default 5-second duration is usually sufficient
+- Flamegraphs help visualize hot paths
+- For accurate CPU profiling of hot code, warm up JIT first:
+  ```clojure
+  eval: "(dotimes [_ 1000] (your-function))"
+  ```
 
 ## Commands
 
-### Development Commands
+### Quick Start
 ```bash
-# Start the MCP server (default: STDIO transport, nREPL on 17888)
+# Start MCP server (STDIO + nREPL on 17888)
 clojure -M:repl-mcp
 
-# Start with both STDIO and HTTP+SSE transports
-clojure -M:repl-mcp --dual-transport
+# HTTP+SSE transport  
+clojure -M:repl-mcp --http-port 8080
 
-# Start with custom nREPL port
-clojure -M:repl-mcp --nrepl-port 19888
+# Custom nREPL port
+clojure -M:repl-mcp --nrepl-port 27889
+```
 
-# Run all tests
+### Development
+```bash
+# Run tests
 clojure -X:test
 
-# Build JAR and run CI pipeline
-clojure -M:build ci
-
-# Introspection commands
+# List available tools
 clojure -M:repl-mcp --list-tools
-clojure -M:repl-mcp --tool-help eval
-clojure -M:repl-mcp --list-prompts
 
-# Code quality commands (via MCP tools)
-# Note: These require an active MCP session
-# lint-code: Check code strings for issues
-# lint-project: Analyze project files
-# setup-clj-kondo: Initialize linting configuration
+# Get tool help
+clojure -M:repl-mcp --tool-help profile-cpu
 ```
 
 ## Architecture
 
-This is a **Model Context Protocol (MCP) server** for Clojure development with 51 built-in tools. The architecture is built around a unified server design with transport abstraction.
+**Built on mcp-toolkit**: A clean, maintainable MCP server with 51 tools for comprehensive Clojure development support.
 
-### Core Components
+### Simple Design
 
-**Transport Layer**: Clean abstraction supporting both STDIO (for CLI tools like Claude Code) and HTTP+SSE (for web clients)
-- `transport.clj`: Transport protocol and configuration
-- `transports/stdio.clj`: STDIO JSON-RPC transport
-- `transports/http_sse.clj`: HTTP Server-Sent Events transport
+1. **Transport Layer**: Pluggable transports (STDIO, HTTP+SSE) via mcp-toolkit
+2. **Tool System**: Consistent tool pattern with automatic registration
+3. **nREPL Integration**: Direct connection to project REPL for all operations
 
-**Tool System**: Dynamic tool registration with runtime addition/removal
-- `dispatch.clj`: Multimethod-based tool routing with registries
-- `tools/`: 51 tools across 8 categories (evaluation, refactoring, cider-nrepl, structural editing, function refactoring, test generation, static analysis, dependency management, advanced navigation)
-- `interactive.clj`: Runtime tool definition using `register-tool!` function
+### Tool Implementation Pattern
 
-**Server Core**: Unified server managing both transports simultaneously
-- `server.clj`: Main server using transport abstraction with nREPL integration
-- `api.clj`: Clean API with 8 core functions for tool/prompt management
-- `util.clj`: Shared MCP specification utilities
+Every tool follows the same simple pattern:
 
-### Key Data Flow
+```clojure
+;; Tool function receives MCP context and arguments
+(defn my-tool-fn [mcp-context arguments]
+  (let [{:keys [param1 param2]} arguments
+        nrepl-client (:nrepl-client mcp-context)]
+    ;; Implementation
+    {:content [{:type "text" :text "Result"}]}))
 
-1. **Server Startup**: `is.simm.repl-mcp/-main` -> `server/start-mcp-server!` -> transport abstraction
-2. **Tool Registration**: Tools auto-register via `dispatch/register-tool!` during namespace loading
-3. **MCP Requests**: Transport -> `dispatch/handle-tool-call` multimethod -> tool handler -> response
-4. **Dynamic Tools**: `interactive/register-tool!` -> `defmethod` -> `dispatch/register-tool!` -> client notifications
+;; Tool definition for mcp-toolkit
+(def tools
+  [{:name "my-tool"
+    :description "What the tool does"
+    :inputSchema {:type "object"
+                  :properties {:param1 {:type "string"}}
+                  :required ["param1"]}
+    :tool-fn my-tool-fn}])
+```
 
-### Tool Categories (51 total)
+### Key Benefits
 
-**Evaluation (2)**: Direct nREPL integration for code evaluation and file loading
-**Refactoring (11)**: Namespace cleaning, symbol finding, code extraction, import organization
-**Cider-nREPL (12)**: Development tools like formatting, testing, completion, documentation
-**Structural Editing (10)**: Session-based code manipulation using rewrite-clj and zippers
-**Function Refactoring (5)**: Project-wide function operations (rename, find usages, replace)
-**Test Generation (1)**: Comprehensive test skeleton generation
-**Static Analysis (3)**: clj-kondo integration for linting, code quality, and style enforcement
-**Dependency Management (3)**: Runtime dependency addition, project synchronization, namespace availability checks
-**Advanced Navigation (2)**: Semantic code navigation using refactor-nrepl and AST analysis for call hierarchy and usage analysis
+- **Minimal Dependencies**: Just mcp-toolkit, nREPL, and tool-specific libs
+- **Consistent Patterns**: All tools work the same way
+- **Robust Error Handling**: Built into every tool
+- **Easy Testing**: Simple functions with clear inputs/outputs
+- **Extensible**: Add new tools by following the pattern
 
-### nREPL Integration
-
-The server starts an nREPL server (default port 17888) with cider-nrepl and refactor-nrepl middleware. Tools requiring nREPL access receive an `:nrepl-client` in their context. The nREPL connection is separate from MCP transport - MCP handles tool calls while nREPL handles code evaluation.
-
-### Logging Strategy
-
-File-only logging via Telemere to avoid stdout contamination (stdout reserved for JSON-RPC with STDIO transport). Logs go to `repl-mcp.log` in the current directory.
-
-## Development Notes
+## Development
 
 ### Adding New Tools
 
-Use the interactive registration system:
-```clojure
-(require '[is.simm.repl-mcp.interactive :as interactive])
+1. Create a file in `src/is/simm/repl_mcp/tools/`
+2. Implement tool function and definitions:
 
-(interactive/register-tool! 
-  :my-tool
-  "Description of what the tool does"
-  {:param {:type "string" :description "Parameter description"}}
-  (fn [tool-call context]
-    {:result "Tool result" :status :success}))
+```clojure
+(ns is.simm.repl-mcp.tools.my-tools
+  (:require [nrepl.core :as nrepl]))
+
+(defn my-tool-fn [mcp-context arguments]
+  (let [{:keys [input]} arguments]
+    {:content [{:type "text" 
+                :text (str "Processed: " input)}]}))
+
+(def tools
+  [{:name "my-tool"
+    :description "Process input"
+    :inputSchema {:type "object"
+                  :properties {:input {:type "string"}}
+                  :required ["input"]}
+    :tool-fn my-tool-fn}])
 ```
 
-For permanent tools, create a file in `src/is/simm/repl_mcp/tools/` following the pattern of existing tools.
+3. Tools auto-register on namespace load
 
-### Transport Abstraction
+### Testing
 
-The transport system uses protocols (`McpTransport`) for pluggable implementations. Each transport registers itself in the transport registry during namespace loading. The server creates transport instances via `create-transport` and manages them through `MultiTransportServer`.
+```bash
+# Run all tests
+clojure -X:test
 
-### Testing Strategy
-
-- Unit tests for individual tools in `test/is/simm/repl_mcp/tools/`
-- Integration tests in `test/is/simm/repl_mcp/`
-- All tests run with `clojure -X:test` (56 tests, 414 assertions)
-- Test fixtures in `test_fixtures.clj` for common test patterns
-- nREPL integration testing for dependency management and evaluation tools
+# Test specific namespace
+clojure -X:test :nses '[is.simm.repl-mcp.tools.my-tools-test]'
+```
 
 ### Project Integration
 
-This project is designed to be added to other Clojure projects via the `:repl-mcp` alias in `deps.edn`. When users add it to their projects, they get access to all 51 tools for their specific codebase through the nREPL connection.
+Add to any Clojure project's `deps.edn`:
 
-The MCP server connects to the project's nREPL server to provide tools that operate on the actual project code, making it context-aware for the specific codebase being worked on.
+```clojure
+{:aliases
+ {:repl-mcp {:git/url "https://github.com/simm-is/repl-mcp"
+             :git/sha "latest"
+             :main-opts ["-m" "is.simm.repl-mcp"]}}}
+```
+
+The MCP server connects to your project's nREPL for context-aware tooling.
