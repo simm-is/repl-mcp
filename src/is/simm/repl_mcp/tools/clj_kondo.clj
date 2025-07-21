@@ -17,11 +17,11 @@
                :data {:code-length (count code) :filename filename :lang lang}})
     
     (let [lint-config (merge {:output {:format :edn}} config)
-          result (clj-kondo/run! {:lint ["-"] 
-                                  :filename filename
-                                  :lang lang
-                                  :config lint-config
-                                  :in code})]
+          temp-file (java.io.File/createTempFile "clj-kondo" (str "." (name lang)))
+          _ (spit temp-file code)
+          result (clj-kondo/run! {:lint [(.getAbsolutePath temp-file)]
+                                  :config lint-config})]
+      (.delete temp-file)
       
       (if (seq (:findings result))
         {:findings (:findings result)

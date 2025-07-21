@@ -10,7 +10,16 @@
 ;; Set telemere log level to error to reduce verbose test output
 (log/set-min-level! :error)
 
-(def test-nrepl-port 57999)  ; Use high port to avoid conflicts
+(def test-nrepl-port (+ 57000 (rand-int 1000)))  ; Use random high port to avoid conflicts
+
+(defn port-available?
+  "Check if a port is available for binding"
+  [port]
+  (try
+    (with-open [socket (java.net.ServerSocket. port)]
+      true)
+    (catch Exception _e
+      false)))
 (def ^:dynamic *test-nrepl-server* nil)
 (def ^:dynamic *test-nrepl-client* nil)
 
@@ -30,16 +39,35 @@
       (throw e))))
 
 (defn stop-test-nrepl-server!
-  "Stop nREPL server"
+  "Stop nREPL server and properly close all sessions and transport"
   [nrepl-state]
   (try
-    (when (:client nrepl-state)
-      ;; nREPL client doesn't have .close method, just let it be garbage collected
-      (log/log! {:level :debug :msg "nREPL client connection closed"}))
+    (when-let [client (:client nrepl-state)]
+      ;; Close all sessions for this client
+      (try
+        (let [sessions (nrepl/message client {:op "ls-sessions"})]
+          (doseq [session-id (-> sessions first :sessions)]
+            (try
+              (nrepl/message client {:op "close" :session session-id})
+              (log/log! {:level :debug :msg "Closed nREPL session" :data {:session-id session-id}})
+              (catch Exception e
+                (log/log! {:level :warn :msg "Failed to close session" :data {:session-id session-id :error (.getMessage e)}})))))
+        (catch Exception e
+          (log/log! {:level :warn :msg "Failed to list/close sessions" :data {:error (.getMessage e)}})))
+      
+      ;; Close the transport
+      (try
+        (when-let [transport (:nrepl.core/transport (meta client))]
+          (.close transport)
+          (log/log! {:level :debug :msg "Closed nREPL transport"}))
+        (catch Exception e
+          (log/log! {:level :warn :msg "Failed to close transport" :data {:error (.getMessage e)}}))))
+    
     (when (:server nrepl-state)
       (nrepl-server/stop-server (:server nrepl-state))
-      ;; Give server threads time to finish cleanup
-      (Thread/sleep 100))
+      ;; Give server threads more time to finish cleanup
+      (Thread/sleep 500))
+    
     (log/log! {:level :info :msg "Test nREPL server stopped"})
     (catch Exception e
       (log/log! {:level :warn :msg "Error stopping test nREPL server" :data {:error (.getMessage e)}}))))

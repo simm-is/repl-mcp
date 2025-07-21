@@ -98,8 +98,12 @@
                 matches (:apropos-matches result)]
             {:content [{:type "text" 
                         :text (if matches
-                                (str "Found " (count matches) " matches:\n"
-                                     (str/join "\n" matches))
+                                (let [symbol-names (map #(get % :name %) matches)
+                                      limited-matches (take 20 symbol-names)]
+                                  (str "Found " (count matches) " matches"
+                                       (when (> (count matches) 20) " (showing first 20)")
+                                       ":\n"
+                                       (str/join "\n" limited-matches)))
                                 "No matches found")}]})
           (catch Exception e
             (log/log! {:level :error :msg "Error in apropos search" :data {:error (.getMessage e)}})
