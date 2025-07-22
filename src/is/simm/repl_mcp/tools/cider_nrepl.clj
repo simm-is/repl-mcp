@@ -1,199 +1,150 @@
 (ns is.simm.repl-mcp.tools.cider-nrepl
-  "Development tools using cider-nrepl middleware"
+  "Development tools using cider-nrepl middleware with safe nREPL interactions"
   (:require 
-   [nrepl.core :as nrepl]
    [clojure.string :as str]
-   [taoensso.telemere :as log]))
+   [taoensso.telemere :as log]
+   [is.simm.repl-mcp.tools.nrepl-utils :as nrepl-utils]))
 
 ;; ===============================================
-;; Cider-nREPL Functions  
+;; Cider-nREPL Tool Functions
 ;; ===============================================
-
-(defn with-nrepl-client
-  "Helper function to check for nREPL client and execute operation"
-  [mcp-context operation-name f]
-  (let [nrepl-client (:nrepl-client mcp-context)]
-    (if (nil? nrepl-client)
-      {:content [{:type "text" 
-                  :text (str "Error: nREPL client not available. " operation-name " requires an active nREPL connection.")}]}
-      (f nrepl-client))))
 
 (defn format-code-tool [mcp-context arguments]
-  (let [{:strs [code]} arguments]
-    (with-nrepl-client mcp-context "Code formatting"
-      (fn [nrepl-client]
-        (try
-          (let [responses (nrepl/message nrepl-client {:op "format-code" :code code})
-                result (first responses)]
-            {:content [{:type "text" 
-                        :text (if (:formatted-code result)
-                                (:formatted-code result)
-                                "Failed to format code")}]})
-          (catch Exception e
-            (log/log! {:level :error :msg "Error formatting code" :data {:error (.getMessage e)}})
-            {:content [{:type "text" :text (str "Error: " (.getMessage e))}]}))))))
+  (let [{:keys [code]} arguments]
+    (nrepl-utils/simple-nrepl-tool mcp-context "Code formatting"
+      (fn [] {:op "format-code" :code code})
+      (fn [responses] 
+        (let [result (first responses)]
+          (or (:formatted-code result) "Failed to format code"))))))
 
 (defn macroexpand-tool [mcp-context arguments]
-  (let [{:strs [code]} arguments]
-    (with-nrepl-client mcp-context "Macro expansion"
-      (fn [nrepl-client]
-        (try
-          (let [responses (nrepl/message nrepl-client {:op "macroexpand" :code code})
-                result (first responses)]
-            {:content [{:type "text" 
-                        :text (if (:expansion result)
-                                (:expansion result)
-                                "Failed to expand macro")}]})
-          (catch Exception e
-            (log/log! {:level :error :msg "Error expanding macro" :data {:error (.getMessage e)}})
-            {:content [{:type "text" :text (str "Error: " (.getMessage e))}]}))))))
+  (let [{:keys [code]} arguments]
+    (nrepl-utils/simple-nrepl-tool mcp-context "Macro expansion"
+      (fn [] {:op "macroexpand" :code code})
+      (fn [responses] 
+        (let [result (first responses)]
+          (or (:expansion result) "Failed to expand macro"))))))
 
 (defn eldoc-tool [mcp-context arguments]
-  (let [{:strs [symbol ns]} arguments
+  (let [{:keys [symbol ns]} arguments
         ns (or ns "user")]
-    (with-nrepl-client mcp-context "Symbol documentation"
-      (fn [nrepl-client]
-        (try
-          (let [responses (nrepl/message nrepl-client {:op "eldoc" :symbol symbol :ns ns})
-                result (first responses)]
-            {:content [{:type "text" 
-                        :text (if (:eldoc result)
-                                (str "Symbol: " (:name result) "\n"
-                                     "Namespace: " (:ns result) "\n"
-                                     "Type: " (:type result) "\n"
-                                     "Documentation: " (:docstring result) "\n"
-                                     "Signatures: " (:eldoc result))
-                                "Symbol not found or no documentation available")}]})
-          (catch Exception e
-            (log/log! {:level :error :msg "Error getting eldoc" :data {:error (.getMessage e)}})
-            {:content [{:type "text" :text (str "Error: " (.getMessage e))}]}))))))
+    (nrepl-utils/simple-nrepl-tool mcp-context "Symbol documentation"
+      (fn [] {:op "eldoc" :symbol symbol :ns ns})
+      (fn [responses] 
+        (let [result (first responses)]
+          (if (:eldoc result)
+            (str "Symbol: " (:name result) "\n"
+                 "Namespace: " (:ns result) "\n"
+                 "Type: " (:type result) "\n"
+                 "Documentation: " (:docstring result) "\n"
+                 "Signatures: " (:eldoc result))
+            "Symbol not found or no documentation available"))))))
 
 (defn complete-tool [mcp-context arguments]
-  (let [{:strs [prefix ns]} arguments
+  (let [{:keys [prefix ns]} arguments
         ns (or ns "user")]
-    (with-nrepl-client mcp-context "Code completion"
-      (fn [nrepl-client]
-        (try
-          (let [responses (nrepl/message nrepl-client {:op "complete" :prefix prefix :ns ns})
-                result (first responses)
-                completions (:completions result)]
-            {:content [{:type "text" 
-                        :text (if completions
-                                (str "Found " (count completions) " completions:\n"
-                                     (str/join "\n" (map :candidate completions)))
-                                "No completions found")}]})
-          (catch Exception e
-            (log/log! {:level :error :msg "Error getting completions" :data {:error (.getMessage e)}})
-            {:content [{:type "text" :text (str "Error: " (.getMessage e))}]}))))))
+    (nrepl-utils/simple-nrepl-tool mcp-context "Code completion"
+      (fn [] {:op "complete" :prefix prefix :ns ns})
+      (fn [responses] 
+        (let [result (first responses)
+              completions (:completions result)]
+          (if completions
+            (str "Found " (count completions) " completions:\n"
+                 (str/join "\n" (map :candidate completions)))
+            "No completions found"))))))
 
 (defn apropos-tool [mcp-context arguments]
-  (let [{:strs [query ns]} arguments
-        message (cond-> {:op "apropos" :query query}
-                  ns (assoc :ns ns))]
-    (with-nrepl-client mcp-context "Symbol search"
-      (fn [nrepl-client]
-        (try
-          (let [responses (nrepl/message nrepl-client message)
-                result (first responses)
-                matches (:apropos-matches result)]
-            {:content [{:type "text" 
-                        :text (if matches
-                                (let [symbol-names (map #(get % :name %) matches)
-                                      limited-matches (take 20 symbol-names)]
-                                  (str "Found " (count matches) " matches"
-                                       (when (> (count matches) 20) " (showing first 20)")
-                                       ":\n"
-                                       (str/join "\n" limited-matches)))
-                                "No matches found")}]})
-          (catch Exception e
-            (log/log! {:level :error :msg "Error in apropos search" :data {:error (.getMessage e)}})
-            {:content [{:type "text" :text (str "Error: " (.getMessage e))}]}))))))
+  (let [{:keys [query ns]} arguments]
+    (nrepl-utils/simple-nrepl-tool mcp-context "Symbol search"
+      (fn [] (cond-> {:op "apropos" :query query}
+               ns (assoc :ns ns)))
+      (fn [responses] 
+        (let [result (first responses)
+              matches (:apropos-matches result)]
+          (if matches
+            (let [symbol-names (map #(or (:name %) (str %)) matches)
+                  limited-matches (take 20 symbol-names)]
+              (str "Found " (count matches) " matches"
+                   (when (> (count matches) 20) " (showing first 20)")
+                   ":\n"
+                   (str/join "\n" limited-matches)))
+            "No matches found"))))))
 
-(defn test-all-tool [mcp-context arguments]
-  (with-nrepl-client mcp-context "Test execution"
-    (fn [nrepl-client]
-      (try
-        (let [responses (nrepl/message nrepl-client {:op "test-all"})
-              results-msgs (filter #(contains? % :results) responses)
-              summary-msgs (filter #(contains? % :summary) responses)
-              test-count (count results-msgs)]
-          {:content [{:type "text" 
-                      :text (str "Test execution completed:\n"
-                                 "Tests run: " test-count "\n"
-                                 (if (> test-count 0)
-                                   (str "Results: " (str results-msgs) "\n"
-                                        "Summary: " (str summary-msgs))
-                                   "No tests found in project"))}]})
-        (catch Exception e
-          (log/log! {:level :error :msg "Error running tests" :data {:error (.getMessage e)}})
-          {:content [{:type "text" :text (str "Error: " (.getMessage e))}]})))))
+(defn test-all-tool [mcp-context _arguments]
+  (nrepl-utils/simple-nrepl-tool mcp-context "Test execution"
+    (fn [] {:op "test-all"})
+    (fn [responses] 
+      (let [results-msgs (filter #(contains? % :results) responses)
+            summary-msgs (filter #(contains? % :summary) responses)
+            results (mapcat :results results-msgs)
+            summary (first (map :summary summary-msgs))]
+        (str "Test execution completed:\n"
+             (if (empty? results)
+               "No tests found in project"
+               (str "Results:\n" 
+                    (str/join "\n" 
+                      (map #(format "  %s.%s: %s" 
+                                   (:ns %) 
+                                   (:var %) 
+                                   (:type %)) 
+                           results))))
+             "\n"
+             (if summary
+               (str "Summary: " 
+                    (:test summary 0) " tests, "
+                    (:pass summary 0) " passed, "
+                    (:fail summary 0) " failed, "
+                    (:error summary 0) " errors")
+               "No summary available"))))))
 
 (defn info-tool [mcp-context arguments]
-  (let [{:strs [symbol ns]} arguments
+  (let [{:keys [symbol ns]} arguments
         ns (or ns "user")]
-    (with-nrepl-client mcp-context "Symbol information"
-      (fn [nrepl-client]
-        (try
-          (let [responses (nrepl/message nrepl-client {:op "info" :symbol symbol :ns ns})
-                result (first responses)]
-            {:content [{:type "text" 
-                        :text (if (contains? (:status result) "no-info")
-                                "No information available for symbol"
-                                (pr-str (dissoc result :id :session :status)))}]})
-          (catch Exception e
-            (log/log! {:level :error :msg "Error getting symbol info" :data {:error (.getMessage e)}})
-            {:content [{:type "text" :text (str "Error: " (.getMessage e))}]}))))))
+    (nrepl-utils/simple-nrepl-tool mcp-context "Symbol information"
+      (fn [] {:op "info" :symbol symbol :ns ns})
+      (fn [responses] 
+        (let [result (first responses)]
+          (if (contains? (:status result) "no-info")
+            "No information available for symbol"
+            (pr-str (dissoc result :id :session :status))))))))
 
-(defn ns-list-tool [mcp-context arguments]
-  (with-nrepl-client mcp-context "Namespace listing"
-    (fn [nrepl-client]
-      (try
-        (let [responses (nrepl/message nrepl-client {:op "ns-list"})
-              result (first responses)
-              namespaces (:ns-list result)]
-          {:content [{:type "text" 
-                      :text (if namespaces
-                              (str "Found " (count namespaces) " namespaces:\n"
-                                   (str/join "\n" namespaces))
-                              "No namespaces found")}]})
-        (catch Exception e
-          (log/log! {:level :error :msg "Error listing namespaces" :data {:error (.getMessage e)}})
-          {:content [{:type "text" :text (str "Error: " (.getMessage e))}]})))))
+(defn ns-list-tool [mcp-context _arguments]
+  (nrepl-utils/simple-nrepl-tool mcp-context "Namespace listing"
+    (fn [] {:op "ns-list"})
+    (fn [responses] 
+      (let [result (first responses)
+            namespaces (:ns-list result)]
+        (if namespaces
+          (str "Found " (count namespaces) " namespaces:\n"
+               (str/join "\n" namespaces))
+          "No namespaces found")))))
 
 (defn ns-vars-tool [mcp-context arguments]
-  (let [{:strs [ns]} arguments]
-    (with-nrepl-client mcp-context "Namespace vars listing"
-      (fn [nrepl-client]
-        (try
-          (let [responses (nrepl/message nrepl-client {:op "ns-vars" :ns ns})
-                result (first responses)
-                vars (:ns-vars result)]
-            {:content [{:type "text" 
-                        :text (if vars
-                                (str "Vars in " ns " (" (count vars) "):\n"
-                                     (str/join "\n" vars))
-                                (str "No vars found in namespace: " ns))}]})
-          (catch Exception e
-            (log/log! {:level :error :msg "Error listing namespace vars" :data {:error (.getMessage e)}})
-            {:content [{:type "text" :text (str "Error: " (.getMessage e))}]}))))))
+  (let [{:keys [ns]} arguments]
+    (nrepl-utils/simple-nrepl-tool mcp-context "Namespace vars listing"
+      (fn [] {:op "ns-vars" :ns ns})
+      (fn [responses] 
+        (let [result (first responses)
+              vars (:ns-vars result)]
+          (if vars
+            (str "Vars in " ns " (" (count vars) "):\n"
+                 (str/join "\n" vars))
+            (str "No vars found in namespace: " ns)))))))
 
-(defn classpath-tool [mcp-context arguments]
-  (with-nrepl-client mcp-context "Classpath information"
-    (fn [nrepl-client]
-      (try
-        (let [responses (nrepl/message nrepl-client {:op "classpath"})
-              result (first responses)
-              classpath (:classpath result)]
-          {:content [{:type "text" 
-                      :text (if classpath
-                              (str "Classpath (" (count classpath) " entries):\n"
-                                   (str/join "\n" classpath))
-                              "No classpath information available")}]})
-        (catch Exception e
-          (log/log! {:level :error :msg "Error getting classpath" :data {:error (.getMessage e)}})
-          {:content [{:type "text" :text (str "Error: " (.getMessage e))}]})))))
+(defn classpath-tool [mcp-context _arguments]
+  (nrepl-utils/simple-nrepl-tool mcp-context "Classpath information"
+    (fn [] {:op "classpath"})
+    (fn [responses] 
+      (let [result (first responses)
+            classpath (:classpath result)]
+        (if classpath
+          (str "Classpath (" (count classpath) " entries):\n"
+               (str/join "\n" classpath))
+          "No classpath information available")))))
 
-(defn refresh-tool [mcp-context arguments]
+(defn refresh-tool 
+  "Safely refresh user namespaces without killing server infrastructure"
+  [_mcp-context _arguments]
   (try
     (let [all-namespaces (all-ns)
           server-prefixes ["is.simm.repl-mcp" "clojure." "nrepl." "cider." "refactor-" 
@@ -227,32 +178,44 @@
       {:content [{:type "text" :text (str "Error: " (.getMessage e))}]})))
 
 (defn test-var-query-tool [mcp-context arguments]
-  (let [{:strs [var-query]} arguments]
-    (with-nrepl-client mcp-context "Specific test execution"
-      (fn [nrepl-client]
-        (try
-          (let [query-map (if (and var-query (str/includes? var-query "/"))
-                            (let [[ns-name var-name] (str/split var-query #"/" 2)]
-                              {:ns-query {:exactly [ns-name]}
-                               :var-query {:exactly [var-name]}})
-                            {:ns-query {:exactly [(str var-query)]}})
-                responses (nrepl/message nrepl-client (assoc query-map :op "test-var-query"))
-                results-msgs (filter #(contains? % :results) responses)
-                summary-msgs (filter #(contains? % :summary) responses)]
-            {:content [{:type "text" 
-                        :text (str "Test Results for " var-query ":\n"
-                                   "Results: " (str results-msgs) "\n"
-                                   "Summary: " (str summary-msgs))}]})
-          (catch Exception e
-            (log/log! {:level :error :msg "Error running specific tests" :data {:error (.getMessage e)}})
-            {:content [{:type "text" :text (str "Error: " (.getMessage e))}]}))))))
+  (let [{:keys [var-query]} arguments]
+    (nrepl-utils/simple-nrepl-tool mcp-context "Specific test execution"
+      (fn [] 
+        (let [query-map (if (and var-query (str/includes? var-query "/"))
+                          (let [[ns-name var-name] (str/split var-query #"/" 2)]
+                            {:ns-query {:exactly [ns-name]}
+                             :var-query {:exactly [var-name]}})
+                          {:ns-query {:exactly [(str var-query)]}})]
+          (assoc query-map :op "test-var-query")))
+      (fn [responses] 
+        (let [results-msgs (filter #(contains? % :results) responses)
+              summary-msgs (filter #(contains? % :summary) responses)
+              results (mapcat :results results-msgs)
+              summary (first (map :summary summary-msgs))]
+          (str "Test Results for " var-query ":\n"
+               (if (empty? results)
+                 "No test results found"
+                 (str "Results:\n" 
+                      (str/join "\n" 
+                        (map #(format "  %s: %s" 
+                                     (or (:var %) (:name %)) 
+                                     (or (:type %) "unknown")) 
+                             results))))
+               "\n"
+               (if summary
+                 (str "Summary: " 
+                      (:test summary 0) " tests, "
+                      (:pass summary 0) " passed, "
+                      (:fail summary 0) " failed, "
+                      (:error summary 0) " errors")
+                 "No summary available")))))))
 
 ;; ===============================================
 ;; Tool Definitions
 ;; ===============================================
 
 (def tools
-  "Cider-nREPL tool definitions for mcp-toolkit"
+  "Cider-nREPL tool definitions for mcp-toolkit with safe nREPL interactions"
   [{:name "format-code"
     :description "Format Clojure code using cider-nrepl's format-code operation"
     :inputSchema {:type "object"

@@ -37,9 +37,7 @@
     ;; Parse coordinates first to validate them
     (let [parsed-coords (parse-lib-coords lib-coords)]
       
-      ;; Check if we're in a REPL context
-      (when-not *repl*
-        (throw (ex-info "add-libs only works in REPL context" {})))
+      ;; We're always in a REPL context when using nREPL
       
       ;; Get the add-libs function  
       (let [add-libs-fn (requiring-resolve 'clojure.repl.deps/add-libs)]
@@ -71,9 +69,7 @@
   (try
     (log/log! {:level :info :msg "Syncing project dependencies"})
     
-    ;; Check if we're in a REPL context
-    (when-not *repl*
-      (throw (ex-info "sync-deps only works in REPL context" {})))
+    ;; We're always in a REPL context when using nREPL
     
     ;; Get the sync-deps function
     (let [sync-deps-fn (requiring-resolve 'clojure.repl.deps/sync-deps)]
@@ -120,47 +116,61 @@
 
 (defn add-libs-tool [mcp-context arguments]
   (log/log! {:level :info :msg "add-libs tool called" :data {:args arguments}})
-  (let [coordinates (get arguments "coordinates")
+  (let [{:keys [coordinates]} arguments
         nrepl-client (:nrepl-client mcp-context)]
     
-    ;; For testing, provide helpful message about limitations
-    (let [result (try
-                   (add-libraries coordinates)
-                   (catch Exception e
-                     {:error (.getMessage e)
-                      :status :error}))]
-      (log/log! {:level :info :msg "add-libs tool result" :data {:result result}})
-      {:content [{:type "text" 
-                  :text (if (= (:status result) :success)
-                          (str (:message result) "\n\nAdded libraries: " 
-                               (str/join ", " (map str (:libraries result))))
-                          (let [error-msg (:error result)]
-                            (if (str/includes? error-msg "REPL context")
-                              (str "Note: " error-msg 
-                                   "\n\nIn test environments, add-libs requires a true REPL context. "
-                                   "This tool works in production when connected to a running REPL.")
-                              (str "Error: " error-msg))))}]})))
+    (try
+      ;; Parse coordinates first to validate them
+      (let [parsed-coords (parse-lib-coords coordinates)
+            ;; Use nREPL to execute add-libs in the proper context
+            add-libs-code (format "(let [add-libs (requiring-resolve 'clojure.repl.deps/add-libs)]
+                                     (add-libs %s)
+                                     {:status :success :libraries %s :message \"Libraries added successfully\"})"
+                                 (pr-str parsed-coords)
+                                 (pr-str (vec (keys parsed-coords))))
+            response (first (nrepl/message nrepl-client {:op "eval" :code add-libs-code}))
+            result (if (:ex response)
+                     {:status :error :error (or (:ex response) "Unknown error")}
+                     (read-string (:value response)))]
+        
+        (log/log! {:level :info :msg "add-libs tool result" :data {:result result}})
+        {:content [{:type "text" 
+                    :text (if (= (:status result) :success)
+                            (str (:message result) "\n\nAdded libraries: " 
+                                 (str/join ", " (map str (:libraries result))))
+                            (str "Error: " (:error result)))}]})
+      
+      (catch Exception e
+        (log/log! {:level :error :msg "add-libs tool error" :data {:error (.getMessage e)}})
+        {:content [{:type "text" :text (str "Error: " (.getMessage e))}]})))))
 
 (defn sync-deps-tool [mcp-context arguments]
   (log/log! {:level :info :msg "sync-deps tool called"})
   (let [nrepl-client (:nrepl-client mcp-context)]
     
-    (let [result (try
-                   (sync-project-deps)
-                   (catch Exception e
-                     {:error (.getMessage e)
-                      :status :error}))]
-      (log/log! {:level :info :msg "sync-deps tool result" :data {:result result}})
-      {:content [{:type "text" 
-                  :text (if (= (:status result) :success)
-                          (:message result)
-                          (str "Note: " (:error result) 
-                               "\n\nIn test environments, sync-deps requires a true REPL context. "
-                               "This tool works in production when connected to a running REPL."))}]})))
+    (try
+      ;; Use nREPL to execute sync-deps in the proper context
+      (let [sync-deps-code "(let [sync-deps (requiring-resolve 'clojure.repl.deps/sync-deps)]
+                              (sync-deps)
+                              {:status :success :message \"Project dependencies synced from deps.edn\"})"
+            response (first (nrepl/message nrepl-client {:op "eval" :code sync-deps-code}))
+            result (if (:ex response)
+                     {:status :error :error (or (:ex response) "Unknown error")}
+                     (read-string (:value response)))]
+        
+        (log/log! {:level :info :msg "sync-deps tool result" :data {:result result}})
+        {:content [{:type "text" 
+                    :text (if (= (:status result) :success)
+                            (:message result)
+                            (str "Error: " (:error result)))}]})
+      
+      (catch Exception e
+        (log/log! {:level :error :msg "sync-deps tool error" :data {:error (.getMessage e)}})
+        {:content [{:type "text" :text (str "Error: " (.getMessage e))}]}))))
 
 (defn check-namespace-tool [mcp-context arguments]
   (log/log! {:level :info :msg "check-namespace tool called" :data {:args arguments}})
-  (let [namespace (get arguments "namespace")
+  (let [{:keys [namespace]} arguments
         result (check-library-available namespace)]
     (log/log! {:level :info :msg "check-namespace tool result" :data {:result result}})
     {:content [{:type "text" 

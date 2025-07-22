@@ -9,7 +9,9 @@
    [clojure.tools.cli :as cli]
    [clojure.string :as str]
    [mcp-toolkit.json-rpc :as json-rpc]
-   [jsonista.core :as j])
+   [jsonista.core :as j]
+   [cider.nrepl :refer [cider-nrepl-handler]]
+   [refactor-nrepl.middleware :refer [wrap-refactor]])
   (:gen-class)
   (:import (clojure.lang LineNumberingPushbackReader)
            (java.io OutputStreamWriter)))
@@ -103,11 +105,16 @@
               (recur))))))))
 
 (defn start-nrepl-server!
-  "Start nREPL server if not already running"
+  "Start nREPL server with cider and refactor middleware"
   [port]
   (try
     (log/log! {:level :info :msg "Starting nREPL server" :data {:port port}})
-    (let [server (nrepl-server/start-server :port port)]
+    (let [middleware-stack (-> cider-nrepl-handler
+                               (wrap-refactor))
+          server (nrepl-server/start-server 
+                  :port port
+                  :handler middleware-stack
+                  :bind "127.0.0.1")]
       (log/log! {:level :info :msg "nREPL server started" :data {:port port}})
       server)
     (catch Exception e

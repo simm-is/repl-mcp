@@ -1,10 +1,43 @@
 (ns is.simm.repl-mcp.tools.refactor
-  "Refactoring tools using refactor-nrepl and structural editing"
+  "Refactoring tools using refactor-nrepl with safe nREPL interactions
+  
+  Available refactor-nrepl operations (as of refactor-nrepl middleware):
+  - artifact-list, artifact-versions, clean-ns, cljr-suggest-libspecs
+  - extract-definition, find-symbol, find-used-locals, hotload-dependency  
+  - namespace-aliases, rename-file-or-dir, resolve-missing, stubs-for-interface
+  - find-used-publics, version, warm-ast-cache, warm-macro-occurrences-cache
+  
+  NOTE: Symbol renaming operations are NOT provided by refactor-nrepl.
+  For symbol renaming, use the custom implementations in function_refactor.clj"
   (:require 
-   [nrepl.core :as nrepl]
-   [clojure.edn :as edn]
    [clojure.string :as str]
-   [taoensso.telemere :as log]))
+   [is.simm.repl-mcp.tools.nrepl-utils :as nrepl-utils]))
+
+;; ===============================================
+;; Response Processing Utilities
+;; ===============================================
+
+(defn process-refactor-response
+  "Process refactor-nrepl responses that may have :err, :out, and other keys"
+  [responses result-key default-msg]
+  (let [result (reduce (fn [acc response]
+                         (cond
+                           (contains? response result-key) (assoc acc :result (get response result-key))
+                           (:err response) (assoc acc :error (:err response))
+                           (:out response) (update acc :output (fnil str "") (:out response))
+                           :else acc))
+                       {} responses)]
+    (if (:error result)
+      (str "Error: " (:error result)
+           (when-let [output (:output result)]
+             (str "\nOutput: " output)))
+      (str default-msg
+           (when-let [result-val (:result result)]
+             (str "\nResult: " result-val))
+           (when-let [output (:output result)]
+             (str "\nOutput: " output))))))
+
+;; REMOVED: process-find-symbol-response - was for find-symbol tool that caused hanging
 
 ;; ===============================================
 ;; Core Refactoring Functions
@@ -12,314 +45,77 @@
 
 (defn clean-namespace
   "Clean and organize namespace declarations using refactor-nrepl"
-  [nrepl-client file-path & {:keys [prune-unused prefer-prefix] 
-                             :or {prune-unused true prefer-prefix true}}]
-  (try
-    (log/log! {:level :info :msg "Cleaning namespace in file" :data {:file-path file-path}})
+  [nrepl-client file-path & {:keys [prune-unused prefer-prefix timeout] 
+                             :or {prune-unused true prefer-prefix true timeout 120000}}]
+  (if-let [validation-error (nrepl-utils/validate-file-exists file-path)]
+    validation-error
     
-    (if (nil? nrepl-client)
-      {:status :error :error "nREPL client is nil"}
-      (let [responses (nrepl/message nrepl-client 
-                                    {:op "clean-ns" 
-                                     :path file-path
-                                     :prune-ns-form (boolean prune-unused)
-                                     :prefix-rewriting (boolean prefer-prefix)})
-            result (reduce (fn [acc response]
-                            (cond
-                              (:ns response) (assoc acc :cleaned-ns (str (:ns response)))
-                              (:err response) (assoc acc :error (:err response))
-                              (:out response) (update acc :output (fnil str "") (:out response))
-                              :else acc))
-                          {} responses)]
-        (if (:error result)
-          (let [error-msg (:error result)
-                output (:output result)
-                combined-error (if (seq output)
-                                (str error-msg "\nOutput: " output)
-                                error-msg)]
-            {:error combined-error
-             :status :error})
-          (let [cleaned-ns (str (:cleaned-ns result))
-                output (str (:output result))
-                combined-value (if (and output (seq output))
-                                (str "Cleaned namespace: " file-path "\nResult: " cleaned-ns "\nOutput: " output)
-                                (str "Cleaned namespace: " file-path "\nResult: " cleaned-ns))]
-            {:value combined-value
-             :status :success}))))
-    (catch Exception e
-      (log/log! {:level :error :msg "Error cleaning namespace" :data {:error (.getMessage e)}})
-      {:error (.getMessage e)
-       :status :error})))
+    (let [result (nrepl-utils/safe-nrepl-message nrepl-client
+                   {:op "clean-ns" 
+                    :path file-path
+                    :prune-ns-form (str (boolean prune-unused))
+                    :prefix-rewriting (str (boolean prefer-prefix))}
+                   :timeout timeout
+                   :operation-name "Namespace cleaning")]
+      (if (= (:status result) :success)
+        {:status :success
+         :value (process-refactor-response (:responses result) :ns (str "Cleaned namespace: " file-path))}
+        result))))
 
-(defn find-symbol-occurrences
-  "Find all occurrences of a symbol in the codebase using refactor-nrepl"
-  [nrepl-client file-path line column]
-  (try
-    (log/log! {:level :info :msg "Finding symbol" :data {:file-path file-path :line line :column column}})
-    
-    (if (nil? nrepl-client)
-      {:status :error :error "nREPL client is nil"}
-      (let [responses (nrepl/message nrepl-client 
-                                    {:op "find-symbol" 
-                                     :file file-path
-                                     :line line
-                                     :column column})
-            occurrences (atom [])]
-        (doseq [response responses]
-          (when (:occurrence response)
-            (swap! occurrences conj (:occurrence response))))
-        
-        {:occurrences @occurrences
-         :file-path file-path
-         :line line
-         :column column
-         :status :success}))
-    (catch Exception e
-      (log/log! {:level :error :msg "Error finding symbol" :data {:error (.getMessage e)}})
-      {:error (.getMessage e)
-       :status :error})))
+;; REMOVED: extract-symbol-at-position - was for find-symbol tool that caused hanging
+
+;; REMOVED: extract-namespace-from-file - was for find-symbol tool that caused hanging
+
+;; REMOVED: find-symbol-occurrences - refactor-nrepl operation causes hanging
 
 (defn rename-file-or-directory
   "Rename a file or directory and update all references using refactor-nrepl"
-  [nrepl-client old-path new-path]
-  (try
-    (log/log! {:level :info :msg "Renaming file/directory" :data {:old-path old-path :new-path new-path}})
+  [nrepl-client old-path new-path & {:keys [timeout] :or {timeout 120000}}]
+  (if-let [validation-error (nrepl-utils/validate-file-exists old-path)]
+    validation-error
     
-    (if (nil? nrepl-client)
-      {:status :error :error "nREPL client is nil"}
-      (do
-        ;; Validate that the source file exists
-        (when-not (.exists (java.io.File. old-path))
-          (throw (Exception. (str "Source file does not exist: " old-path))))
-        
-        (let [responses (nrepl/message nrepl-client 
-                                      {:op "rename-file-or-dir" 
-                                       :old-path old-path
-                                       :new-path new-path})
-              result (reduce (fn [acc response]
-                              (cond
-                                (:touched response) (assoc acc :touched (:touched response))
-                                (:err response) (assoc acc :error (:err response))
-                                (:out response) (update acc :output (fnil str "") (:out response))
-                                :else acc))
-                            {} responses)]
-          (if (:error result)
-            (let [error-msg (:error result)
-                  output (:output result)
-                  combined-error (if (seq output)
-                                  (str error-msg "\nOutput: " output)
-                                  error-msg)]
-              {:error combined-error
-               :status :error})
-            (let [touched (:touched result)
-                  output (:output result)
-                  combined-value (if (seq output)
-                                  (str "Renamed " old-path " to " new-path "\nTouched files: " touched "\nOutput: " output)
-                                  (str "Renamed " old-path " to " new-path "\nTouched files: " touched))]
-              {:value combined-value
-               :status :success})))))
-    (catch Exception e
-      (log/log! {:level :error :msg "Error renaming file or directory" :data {:error (.getMessage e)}})
-      {:error (.getMessage e)
-       :status :error})))
+    (let [result (nrepl-utils/safe-nrepl-message nrepl-client
+                   {:op "rename-file-or-dir" 
+                    :old-path old-path
+                    :new-path new-path}
+                   :timeout timeout
+                   :operation-name "File/directory rename")]
+      (if (= (:status result) :success)
+        {:status :success
+         :value (process-refactor-response (:responses result) :touched 
+                  (str "Renamed " old-path " to " new-path))}
+        result))))
 
-(defn resolve-missing-symbol
-  "Resolve missing or unresolved symbols using refactor-nrepl"
-  [nrepl-client symbol namespace]
-  (try
-    (log/log! {:level :info :msg "Resolving missing symbol" :data {:symbol symbol :namespace namespace}})
-    
-    (if (nil? nrepl-client)
-      {:status :error :error "nREPL client is nil"}
-      (let [responses (nrepl/message nrepl-client 
-                                    {:op "resolve-missing" 
-                                     :symbol symbol
-                                     :ns namespace})
-            result (reduce (fn [acc response]
-                            (cond
-                              (:candidates response) (assoc acc :candidates (:candidates response))
-                              (:err response) (assoc acc :error (:err response))
-                              (:out response) (update acc :output (fnil str "") (:out response))
-                              :else acc))
-                          {} responses)]
-        (if (:error result)
-          (let [error-msg (:error result)
-                output (:output result)
-                combined-error (if (seq output)
-                                (str error-msg "\nOutput: " output)
-                                error-msg)]
-            {:error combined-error
-             :status :error})
-          (let [candidates (:candidates result)
-                output (:output result)
-                combined-value (if (seq output)
-                                (str "Resolved " namespace "/" symbol "\nCandidates: " candidates "\nOutput: " output)
-                                (str "Resolved " namespace "/" symbol "\nCandidates: " candidates))]
-            {:value combined-value
-             :status :success}))))
-    (catch Exception e
-      (log/log! {:level :error :msg "Error resolving missing symbol" :data {:error (.getMessage e)}})
-      {:error (.getMessage e)
-       :status :error})))
-
-(defn find-used-locals
-  "Find locally used variables at a specific location using refactor-nrepl"
-  [nrepl-client file-path line column]
-  (try
-    (log/log! {:level :info :msg "Finding used locals" :data {:file-path file-path :line line :column column}})
-    
-    (if (nil? nrepl-client)
-      {:status :error :error "nREPL client is nil"}
-      (do
-        ;; Validate that the file exists
-        (when-not (.exists (java.io.File. file-path))
-          (throw (Exception. (str "File does not exist: " file-path))))
-        
-        (let [responses (nrepl/message nrepl-client 
-                                      {:op "find-used-locals" 
-                                       :file file-path
-                                       :line line
-                                       :column column})
-              result (reduce (fn [acc response]
-                              (cond
-                                (:used-locals response) (assoc acc :used-locals (:used-locals response))
-                                (:err response) (assoc acc :error (:err response))
-                                (:out response) (update acc :output (fnil str "") (:out response))
-                                :else acc))
-                            {} responses)]
-          (if (:error result)
-            (let [error-msg (:error result)
-                  output (:output result)
-                  combined-error (if (seq output)
-                                  (str error-msg "\nOutput: " output)
-                                  error-msg)]
-              {:error combined-error
-               :status :error})
-            (let [used-locals (:used-locals result)
-                  output (:output result)
-                  combined-value (if (seq output)
-                                  (str "Used locals at " file-path ":" line ":" column "\nLocals: " used-locals "\nOutput: " output)
-                                  (str "Used locals at " file-path ":" line ":" column "\nLocals: " used-locals))]
-              {:value combined-value
-               :status :success})))))
-    (catch Exception e
-      (log/log! {:level :error :msg "Error finding used locals" :data {:error (.getMessage e)}})
-      {:error (.getMessage e)
-       :status :error})))
 
 ;; ===============================================
 ;; Tool Implementations
 ;; ===============================================
 
 (defn clean-ns-tool [mcp-context arguments]
-  (let [{:strs [file-path prune-unused prefer-prefix]} arguments
-        nrepl-client (:nrepl-client mcp-context)]
-    (if (nil? nrepl-client)
-      {:content [{:type "text" 
-                  :text "Error: nREPL client not available. Namespace cleaning requires an active nREPL connection."}]}
-      (try
-        (let [parsed-prune (cond
-                              (string? prune-unused) (Boolean/parseBoolean prune-unused)
-                              (nil? prune-unused) true
-                              :else (boolean prune-unused))
-              parsed-prefix (cond
-                              (string? prefer-prefix) (Boolean/parseBoolean prefer-prefix)
-                              (nil? prefer-prefix) true
-                              :else (boolean prefer-prefix))
-              result (clean-namespace nrepl-client file-path 
-                                    :prune-unused parsed-prune
-                                    :prefer-prefix parsed-prefix)]
-          {:content [{:type "text" 
-                      :text (if (= (:status result) :success)
-                              (str (:value result))
-                              (str "Error: " (:error result)))}]})
-        (catch Exception e
-          {:content [{:type "text" 
-                      :text (str "Error: " (.getMessage e))}]})))))
+  (let [{:keys [file-path prune-unused prefer-prefix]} arguments]
+    (nrepl-utils/with-safe-nrepl mcp-context "Namespace cleaning"
+      (fn [nrepl-client timeout]
+        (clean-namespace nrepl-client file-path 
+                        :prune-unused (boolean prune-unused)
+                        :prefer-prefix (boolean prefer-prefix)
+                        :timeout timeout)))))
 
-(defn find-symbol-tool [mcp-context arguments]
-  (let [{:strs [file-path line column]} arguments
-        nrepl-client (:nrepl-client mcp-context)]
-    (if (nil? nrepl-client)
-      {:content [{:type "text" 
-                  :text "Error: nREPL client not available. Symbol finding requires an active nREPL connection."}]}
-      (let [result (find-symbol-occurrences nrepl-client file-path line column)]
-        {:content [{:type "text" 
-                    :text (if (= (:status result) :success)
-                            (str "Found " (count (:occurrences result)) " occurrences of symbol at " 
-                                 file-path ":" line ":" column "\n"
-                                 (str/join "\n" (map str (:occurrences result))))
-                            (str "Error: " (:error result)))}]}))))
+;; REMOVED: find-symbol-tool - refactor-nrepl operation causes hanging
 
 (defn rename-file-or-dir-tool [mcp-context arguments]
-  (let [{:strs [old-path new-path]} arguments
-        nrepl-client (:nrepl-client mcp-context)]
-    (if (nil? nrepl-client)
-      {:content [{:type "text" 
-                  :text "Error: nREPL client not available. File renaming requires an active nREPL connection."}]}
-      (let [result (rename-file-or-directory nrepl-client old-path new-path)]
-        {:content [{:type "text" 
-                    :text (if (= (:status result) :success)
-                            (:value result)
-                            (str "Error: " (:error result)))}]}))))
+  (let [{:keys [old-path new-path]} arguments]
+    (nrepl-utils/with-safe-nrepl mcp-context "File/directory rename"
+      (fn [nrepl-client timeout]
+        (rename-file-or-directory nrepl-client old-path new-path
+                                 :timeout timeout)))))
 
-(defn resolve-missing-tool [mcp-context arguments]
-  (let [{:strs [symbol namespace]} arguments
-        nrepl-client (:nrepl-client mcp-context)]
-    (if (nil? nrepl-client)
-      {:content [{:type "text" 
-                  :text "Error: nREPL client not available. Symbol resolution requires an active nREPL connection."}]}
-      (let [result (resolve-missing-symbol nrepl-client symbol namespace)]
-        {:content [{:type "text" 
-                    :text (if (= (:status result) :success)
-                            (:value result)
-                            (str "Error: " (:error result)))}]}))))
-
-(defn find-used-locals-tool [mcp-context arguments]
-  (let [{:strs [file-path line column]} arguments
-        nrepl-client (:nrepl-client mcp-context)]
-    (if (nil? nrepl-client)
-      {:content [{:type "text" 
-                  :text "Error: nREPL client not available. Local variable analysis requires an active nREPL connection."}]}
-      (let [result (find-used-locals nrepl-client file-path line column)]
-        {:content [{:type "text" 
-                    :text (if (= (:status result) :success)
-                            (:value result)
-                            (str "Error: " (:error result)))}]}))))
-
-;; Note: Advanced refactoring tools require structural editing dependency
-;; These are simplified versions without the structural editing dependency
-
-(defn extract-function-tool [mcp-context arguments]
-  {:content [{:type "text" 
-              :text "Extract function requires structural editing session. Use structural-edit tools first."}]})
-
-(defn extract-variable-tool [mcp-context arguments]  
-  {:content [{:type "text" 
-              :text "Extract variable requires structural editing session. Use structural-edit tools first."}]})
-
-(defn add-function-parameter-tool [mcp-context arguments]
-  {:content [{:type "text" 
-              :text "Add function parameter requires structural editing session. Use structural-edit tools first."}]})
-
-(defn organize-imports-tool [mcp-context arguments]
-  {:content [{:type "text" 
-              :text "Organize imports requires structural editing session. Use structural-edit tools first."}]})
-
-(defn inline-function-tool [mcp-context arguments]
-  {:content [{:type "text" 
-              :text "Inline function requires structural editing session. Use structural-edit tools first."}]})
-
-(defn rename-local-variable-tool [mcp-context arguments]
-  {:content [{:type "text" 
-              :text "Rename local variable requires structural editing session. Use structural-edit tools first."}]})
 
 ;; ===============================================
 ;; Tool Definitions
 ;; ===============================================
 
 (def tools
-  "Refactoring tool definitions for mcp-toolkit"
+  "Refactoring tool definitions for mcp-toolkit with safe nREPL interactions"
   [{:name "clean-ns"
     :description "Clean and organize namespace declarations"
     :inputSchema {:type "object"
@@ -329,14 +125,7 @@
                   :required ["file-path"]}
     :tool-fn clean-ns-tool}
    
-   {:name "find-symbol"
-    :description "Find all occurrences of a symbol in the codebase"
-    :inputSchema {:type "object"
-                  :properties {:file-path {:type "string" :description "Path to the Clojure file"}
-                              :line {:type "number" :description "Line number of the symbol"}
-                              :column {:type "number" :description "Column number of the symbol"}}
-                  :required ["file-path" "line" "column"]}
-    :tool-fn find-symbol-tool}
+   ;; REMOVED: find-symbol tool - refactor-nrepl operation causes hanging
    
    {:name "rename-file-or-dir"
     :description "Rename a file or directory and update all references"
@@ -346,69 +135,4 @@
                   :required ["old-path" "new-path"]}
     :tool-fn rename-file-or-dir-tool}
    
-   {:name "resolve-missing"
-    :description "Resolve missing or unresolved symbols"
-    :inputSchema {:type "object"
-                  :properties {:symbol {:type "string" :description "The unresolved symbol"}
-                              :namespace {:type "string" :description "The namespace containing the symbol"}}
-                  :required ["symbol" "namespace"]}
-    :tool-fn resolve-missing-tool}
-   
-   {:name "find-used-locals"
-    :description "Find locally used variables at a specific location"
-    :inputSchema {:type "object"
-                  :properties {:file-path {:type "string" :description "Path to the Clojure file"}
-                              :line {:type "number" :description "Line number"}
-                              :column {:type "number" :description "Column number"}}
-                  :required ["file-path" "line" "column"]}
-    :tool-fn find-used-locals-tool}
-   
-   {:name "extract-function"
-    :description "Extract selected code into a new function"
-    :inputSchema {:type "object"
-                  :properties {:session-id {:type "string" :description "Session identifier"}
-                              :function-name {:type "string" :description "Name for the new function"}
-                              :parameters {:type "string" :description "Function parameters as EDN vector"}}
-                  :required ["session-id" "function-name" "parameters"]}
-    :tool-fn extract-function-tool}
-   
-   {:name "extract-variable"
-    :description "Extract current expression into a let binding"
-    :inputSchema {:type "object"
-                  :properties {:session-id {:type "string" :description "Session identifier"}
-                              :variable-name {:type "string" :description "Name for the new variable"}}
-                  :required ["session-id" "variable-name"]}
-    :tool-fn extract-variable-tool}
-   
-   {:name "add-function-parameter"
-    :description "Add a parameter to a function definition"
-    :inputSchema {:type "object"
-                  :properties {:session-id {:type "string" :description "Session identifier"}
-                              :parameter-name {:type "string" :description "Name of the parameter to add"}
-                              :default-value {:type "string" :description "Default value for the parameter"}}
-                  :required ["session-id" "parameter-name"]}
-    :tool-fn add-function-parameter-tool}
-   
-   {:name "organize-imports"
-    :description "Organize and clean up namespace imports"
-    :inputSchema {:type "object"
-                  :properties {:session-id {:type "string" :description "Session identifier"}}
-                  :required ["session-id"]}
-    :tool-fn organize-imports-tool}
-   
-   {:name "inline-function"
-    :description "Inline a function call by replacing it with the function body"
-    :inputSchema {:type "object"
-                  :properties {:session-id {:type "string" :description "Session identifier"}
-                              :function-name {:type "string" :description "Name of the function to inline"}}
-                  :required ["session-id" "function-name"]}
-    :tool-fn inline-function-tool}
-   
-   {:name "rename-local-variable"
-    :description "Rename a local variable within its scope"
-    :inputSchema {:type "object"
-                  :properties {:session-id {:type "string" :description "Session identifier"}
-                              :old-name {:type "string" :description "Current variable name"}
-                              :new-name {:type "string" :description "New variable name"}}
-                  :required ["session-id" "old-name" "new-name"]}
-    :tool-fn rename-local-variable-tool}])
+])
