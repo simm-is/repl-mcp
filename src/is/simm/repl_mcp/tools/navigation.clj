@@ -126,7 +126,7 @@
   "Format call hierarchy results for display"
   [hierarchy-result]
   (if (:error hierarchy-result)
-    (str "Error: " (:error hierarchy-result))
+    (str "Error: " (or (:error hierarchy-result) "Call hierarchy analysis failed"))
     (let [hierarchy-data (:value hierarchy-result)
           {:keys [callers function namespace message]} hierarchy-data
           caller-count (count callers)]
@@ -218,7 +218,7 @@
   "Format comprehensive usage analysis"
   [usage-result]
   (if (:error usage-result)
-    (str "Error: " (:error usage-result))
+    (str "Error: " (or (:error usage-result) "Symbol usage analysis failed"))
     (let [usage-data (:value usage-result)
           {:keys [usages symbol namespace message]} usage-data
           analysis (categorize-usages usages)]
@@ -256,13 +256,13 @@
                   :text "Error: Only 'callers' direction is currently supported"}]}
       
       :else
-      (let [result (nrepl-utils/with-safe-nrepl mcp-context "Call hierarchy analysis"
-                     (fn [nrepl-client timeout]
-                       (build-call-hierarchy nrepl-client (str namespace) (str function) max-depth :timeout timeout))
-                     :timeout 120000)]
-        (if (= (:status result) :success)
-          {:content [{:type "text" :text (format-call-hierarchy result)}]}
-          result)))))
+      (nrepl-utils/with-safe-nrepl mcp-context "Call hierarchy analysis"
+        (fn [nrepl-client timeout]
+          (let [result (build-call-hierarchy nrepl-client (str namespace) (str function) max-depth :timeout timeout)]
+            (if (= (:status result) :success)
+              {:status :success :value (format-call-hierarchy result)}
+              {:status :error :error (format-call-hierarchy result)})))
+        :timeout 120000))))
 
 (defn usage-finder-tool [mcp-context arguments]
   (let [{:keys [namespace symbol include-context]} arguments
@@ -279,7 +279,10 @@
       :else
       (nrepl-utils/with-safe-nrepl mcp-context "Symbol usage analysis"
         (fn [nrepl-client timeout]
-          (find-symbol-usages nrepl-client (str namespace) (str symbol) include-context :timeout timeout))
+          (let [result (find-symbol-usages nrepl-client (str namespace) (str symbol) include-context :timeout timeout)]
+            (if (= (:status result) :success)
+              {:status :success :value (format-usage-analysis result)}
+              {:status :error :error (format-usage-analysis result)})))
         :timeout 120000))))
 
 ;; ===============================================

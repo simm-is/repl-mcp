@@ -155,7 +155,8 @@
       ;; Test refactoring tools
       (testing "Refactoring tools"
         (is (contains? tool-names "clean-ns") "Should have namespace cleaning")
-        (is (contains? tool-names "find-symbol") "Should have symbol finding"))
+        ;; Note: find-symbol was removed due to hanging issues with refactor-nrepl
+        (is (contains? tool-names "usage-finder") "Should have symbol usage finding"))
       
       ;; Test static analysis tools
       (testing "Static analysis tools"

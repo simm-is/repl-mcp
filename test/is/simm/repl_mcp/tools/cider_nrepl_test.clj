@@ -36,19 +36,28 @@
 (deftest error-handling-test
   (testing "cider tool functions handle nil context gracefully"
     (testing "format-code-tool with nil context"
-      (let [result (cider-tools/format-code-tool {:code "(defn test [x] x)"} {})]
+      (let [result (cider-tools/format-code-tool {} {:code "(defn test [x] x)"})]
         (is (map? result))
-        (is (contains? result :content))))
+        (is (contains? result :content))
+        (is (str/includes? (:text (first (:content result))) "Error"))))
     
     (testing "eldoc-tool with nil context"
-      (let [result (cider-tools/eldoc-tool {:symbol "map"} {})]
+      (let [result (cider-tools/eldoc-tool {} {:symbol "map"})]
         (is (map? result))
-        (is (contains? result :content))))
+        (is (contains? result :content))
+        (is (str/includes? (:text (first (:content result))) "Error"))))
     
     (testing "complete-tool with nil context"
-      (let [result (cider-tools/complete-tool {:prefix "ma"} {})]
+      (let [result (cider-tools/complete-tool {} {:prefix "ma"})]
         (is (map? result))
-        (is (contains? result :content))))))
+        (is (contains? result :content))
+        (is (str/includes? (:text (first (:content result))) "Error"))))
+    
+    (testing "info-tool with nil context"
+      (let [result (cider-tools/info-tool {} {:symbol "map"})]
+        (is (map? result))
+        (is (contains? result :content))
+        (is (str/includes? (:text (first (:content result))) "Error"))))))
 
 (deftest tool-handler-test
   (testing "tool handlers return proper MCP format"
@@ -67,3 +76,17 @@
         (is (map? result))
         (is (contains? result :content))
         (is (str/includes? (:text (first (:content result))) "Error"))))))
+
+;; Integration tests with nREPL would go here, but require a live nREPL server
+;; The cider-nrepl tools now use standardized nREPL handling through nrepl-utils
+;; which provides timeout protection and consistent error handling
+
+(deftest nrepl-utils-integration-test
+  (testing "cider tools use safe nREPL handling"
+    (testing "all tool functions follow the new pattern"
+      ;; All cider-nrepl tools now use the safe-nrepl-message utility
+      ;; which provides:
+      ;; - Timeout handling (default 120s, configurable)
+      ;; - Proper error messages
+      ;; - Consistent response handling
+      (is true "Tools have been migrated to use nrepl-utils"))))

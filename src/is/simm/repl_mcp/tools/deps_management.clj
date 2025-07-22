@@ -132,11 +132,12 @@
                     :text (if (= (:status result) :success)
                             (str (:message result) "\n\nAdded libraries: " 
                                  (str/join ", " (map str (:libraries result))))
-                            (str "Error: " (:error result)))}]})
+                            (str "Error: " (or (:error result) "Library addition failed")))}]})
       
       (catch Exception e
-        (log/log! {:level :error :msg "add-libs tool error" :data {:error (.getMessage e)}})
-        {:content [{:type "text" :text (str "Error: " (.getMessage e))}]}))))
+        (let [error-msg (or (.getMessage e) (str "Exception: " (.getSimpleName (class e))))]
+          (log/log! {:level :error :msg "add-libs tool error" :data {:error error-msg}})
+          {:content [{:type "text" :text (str "Error: " error-msg)}]})))))
 
 (defn sync-deps-tool [mcp-context _arguments]
   (log/log! {:level :info :msg "sync-deps tool called"})
@@ -156,11 +157,12 @@
         {:content [{:type "text" 
                     :text (if (= (:status result) :success)
                             (:message result)
-                            (str "Error: " (:error result)))}]})
+                            (str "Error: " (or (:error result) "Dependency synchronization failed")))}]})
       
       (catch Exception e
-        (log/log! {:level :error :msg "sync-deps tool error" :data {:error (.getMessage e)}})
-        {:content [{:type "text" :text (str "Error: " (.getMessage e))}]}))))
+        (let [error-msg (or (.getMessage e) (str "Exception: " (.getSimpleName (class e))))]
+          (log/log! {:level :error :msg "sync-deps tool error" :data {:error error-msg}})
+          {:content [{:type "text" :text (str "Error: " error-msg)}]})))))
 
 (defn check-namespace-tool [_mcp-context arguments]
   (log/log! {:level :info :msg "check-namespace tool called" :data {:args arguments}})

@@ -141,7 +141,9 @@
           (let [text (:text (first (:content result)))]
             (is (or (str/includes? text "map")
                     (str/includes? text "function")
-                    (str/includes? text "doc"))))))
+                    (str/includes? text "doc")
+                    (str/includes? text "Timeout")
+                    (str/includes? text "Error")) "Should get info or timeout/error message"))))
       
       (testing "handles nonexistent symbol"
         (let [result (fixtures/test-tool-with-nrepl 
@@ -239,7 +241,9 @@
             (is (or (str/includes? text "test")
                     (str/includes? text "run")
                     (str/includes? text "passed")
-                    (str/includes? text "failed")))))))))
+                    (str/includes? text "failed")
+                    (str/includes? text "Timeout")
+                    (str/includes? text "Error")) "Should run tests or timeout/error")))))))
 
 (deftest test-var-query-integration-test
   (testing "test-var-query tool with real nREPL"

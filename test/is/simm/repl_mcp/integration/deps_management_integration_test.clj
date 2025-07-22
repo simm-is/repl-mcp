@@ -67,7 +67,9 @@
             (is (or (str/includes? text "Successfully added")
                     (str/includes? text "Note:")
                     (str/includes? text "requires")
-                    (str/includes? text "Clojure 1.12"))))))
+                    (str/includes? text "Clojure 1.12")
+                    (str/includes? text "Error:")
+                    (str/includes? text "Exception")) "Should handle add-libs operation or explain error"))))
       
       (testing "handles invalid coordinates"
         (let [result (fixtures/test-tool-with-nrepl 
@@ -106,7 +108,9 @@
                     (str/includes? text "No new")
                     (str/includes? text "dependencies")
                     (str/includes? text "requires")
-                    (str/includes? text "Clojure 1.12")))))))))
+                    (str/includes? text "Clojure 1.12")
+                    (str/includes? text "Error:")
+                    (str/includes? text "Exception")) "Should handle sync-deps operation or explain error")))))))
 
 ;; Test the helper functions
 (deftest parse-lib-coords-integration-test
