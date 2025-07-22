@@ -35,13 +35,8 @@
                :data {:coords lib-coords}})
     
     ;; Parse coordinates first to validate them
-    (let [parsed-coords (parse-lib-coords lib-coords)]
-      
-      ;; We're always in a REPL context when using nREPL
-      
-      ;; Get the add-libs function  
-      (let [add-libs-fn (requiring-resolve 'clojure.repl.deps/add-libs)]
-      
+    (let [parsed-coords (parse-lib-coords lib-coords)
+          add-libs-fn (requiring-resolve 'clojure.repl.deps/add-libs)]
       (when-not add-libs-fn
         (throw (ex-info "add-libs not available - requires Clojure 1.12+" {})))
         
@@ -54,8 +49,7 @@
         {:libraries (vec (keys parsed-coords))
          :coordinates parsed-coords
          :message "Libraries added successfully to REPL classpath"
-         :status :success}))
-    
+         :status :success})
     (catch Exception e
       (log/log! {:level :error :msg "Error adding libraries" 
                  :data {:error (.getMessage e) :coords lib-coords}})
@@ -142,9 +136,9 @@
       
       (catch Exception e
         (log/log! {:level :error :msg "add-libs tool error" :data {:error (.getMessage e)}})
-        {:content [{:type "text" :text (str "Error: " (.getMessage e))}]})))))
+        {:content [{:type "text" :text (str "Error: " (.getMessage e))}]}))))
 
-(defn sync-deps-tool [mcp-context arguments]
+(defn sync-deps-tool [mcp-context _arguments]
   (log/log! {:level :info :msg "sync-deps tool called"})
   (let [nrepl-client (:nrepl-client mcp-context)]
     
@@ -168,7 +162,7 @@
         (log/log! {:level :error :msg "sync-deps tool error" :data {:error (.getMessage e)}})
         {:content [{:type "text" :text (str "Error: " (.getMessage e))}]}))))
 
-(defn check-namespace-tool [mcp-context arguments]
+(defn check-namespace-tool [_mcp-context arguments]
   (log/log! {:level :info :msg "check-namespace tool called" :data {:args arguments}})
   (let [{:keys [namespace]} arguments
         result (check-library-available namespace)]
