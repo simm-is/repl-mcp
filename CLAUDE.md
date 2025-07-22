@@ -57,30 +57,63 @@ This MCP server is built on [mcp-toolkit](https://github.com/metosin/mcp-toolkit
 - `profile-cpu` - CPU usage analysis with flamegraphs
 - `profile-alloc` - Memory allocation profiling
 
-**Code Quality (3 tools)**
+**Code Quality & Analysis (7 tools)**
 - `lint-code` - Check code strings
 - `lint-project` - Analyze entire codebases
 - `setup-clj-kondo` - Initialize linting
+- `analyze-project` - Get full AST analysis data
+- `find-unused-vars` - Find unused variables and functions
+- `find-var-definitions` - Find variable/function definitions
+- `find-var-usages` - Find all variable/function usages
 
 **Dependencies (3 tools)**
 - `add-libs` - Hot-load dependencies
 - `sync-deps` - Sync from deps.edn
 - `check-namespace` - Verify availability
 
-### Code Quality Workflow
+### Code Quality & Analysis Workflow
 
-**Integrated Linting**: clj-kondo provides real-time feedback with zero configuration required.
+**Integrated Analysis**: clj-kondo provides comprehensive AST-based code analysis with zero configuration required.
 
 **Quick Start:**
 1. Run `setup-clj-kondo` once per project to initialize
-2. Use `lint-code` during development for immediate feedback
+2. Use `lint-code` during development for immediate feedback  
 3. Run `lint-project` before commits for comprehensive checks
+4. Use analysis tools for codebase understanding and refactoring
 
 **Key Features:**
 - Automatic config detection from `.clj-kondo/config.edn`
 - Library-specific rules via `copy-configs: true`
 - Clear error/warning distinction
 - Fast performance even on large codebases
+- Full AST analysis for vars, usages, and definitions
+
+**Analysis Tools Workflow:**
+```clojure
+;; Find all unused vars for cleanup
+find-unused-vars:
+  paths: ["src"]
+
+;; Get comprehensive project analysis
+analyze-project:
+  paths: ["src" "test"]
+
+;; Find specific variable definitions
+find-var-definitions:
+  paths: ["src"]
+  name-filter: "my-function"
+
+;; Find all usages of a namespace
+find-var-usages:
+  paths: ["src"]
+  namespace-filter: "myapp.core"
+```
+
+**Use Cases:**
+- **Cleanup**: Find unused functions and variables
+- **Refactoring**: Understand variable usages before changes  
+- **Architecture**: Analyze dependencies and relationships
+- **Onboarding**: Explore codebase structure systematically
 
 ### Dependency Management
 

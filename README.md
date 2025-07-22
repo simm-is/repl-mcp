@@ -100,6 +100,13 @@ Add `.vscode/mcp.json` to your project:
 - **format-code** - Format code using cljfmt
 - **lint-code** - Lint code with clj-kondo
 - **lint-project** - Lint entire directories
+- **setup-clj-kondo** - Initialize clj-kondo configuration
+
+### Code Analysis with clj-kondo
+- **analyze-project** - Get full AST analysis data for projects
+- **find-unused-vars** - Find all unused variables and functions
+- **find-var-definitions** - Find variable and function definitions
+- **find-var-usages** - Find all usages of variables and functions
 
 ### Refactoring Tools
 - **clean-ns** - Clean and organize namespaces
@@ -150,6 +157,22 @@ rename-function-across-project:
   project-root: "."
   old-name: "calculate-total"
   new-name: "compute-sum"
+```
+
+### Code Analysis
+```clojure
+;; Find unused variables
+find-unused-vars:
+  paths: ["src"]
+
+;; Analyze entire project  
+analyze-project:
+  paths: ["src" "test"]
+
+;; Find all usages of a variable
+find-var-usages:
+  paths: ["src"]
+  namespace-filter: "myapp.core"
 ```
 
 ### Profiling

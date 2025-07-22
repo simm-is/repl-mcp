@@ -137,7 +137,7 @@
               (if (= (:status rename-result) :success)
                 (do
                   (swap! results update :files-modified inc)
-                  (swap! results update :total-replacements + (:invocations-renamed rename-result))
+                  (swap! results update :total-replacements + (:replacements rename-result))
                   (swap! results update :modified-files conj file-path))
                 (swap! results update :errors conj {:file-path file-path
                                                    :error (:error rename-result)}))))

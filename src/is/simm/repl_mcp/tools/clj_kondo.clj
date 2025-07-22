@@ -3,7 +3,9 @@
   (:require 
    [clj-kondo.core :as clj-kondo]
    [taoensso.telemere :as log]
-   [clojure.java.io :as io]))
+   [clojure.java.io :as io]
+   [clojure.set :as set]
+   [clojure.string :as str]))
 
 ;; ===============================================
 ;; Clj-kondo Functions
@@ -86,6 +88,131 @@
                  :data {:error (.getMessage e) :project-root project-root}})
       {:error (.getMessage e) :status :error})))
 
+(defn analyze-project
+  "Get full clj-kondo analysis data for a project"
+  [paths & {:keys [config] :or {config {}}}]
+  (try
+    (log/log! {:level :info :msg "Analyzing project with clj-kondo" 
+               :data {:paths paths}})
+    
+    (let [analysis-config (merge {:output {:format :edn}
+                                  :analysis {:var-definitions {:shallow true}
+                                            :var-usages {:shallow true}
+                                            :keywords true
+                                            :locals true}} 
+                                 config)
+          result (clj-kondo/run! {:lint paths :config analysis-config})]
+      
+      {:analysis (:analysis result)
+       :summary (:summary result)
+       :findings (:findings result)
+       :status :success})
+    
+    (catch Exception e
+      (log/log! {:level :error :msg "Project analysis failed" 
+                 :data {:error (.getMessage e) :paths paths}})
+      {:error (.getMessage e) :status :error})))
+
+(defn find-unused-vars
+  "Find all unused vars in a project"
+  [paths & {:keys [config include-private?] :or {config {} include-private? true}}]
+  (try
+    (log/log! {:level :info :msg "Finding unused vars" 
+               :data {:paths paths :include-private? include-private?}})
+    
+    (let [analysis-result (analyze-project paths :config config)]
+      (if (= (:status analysis-result) :success)
+        (let [analysis (:analysis analysis-result)
+              {:keys [var-definitions var-usages]} analysis
+              
+              ;; Filter out private vars if requested
+              filtered-definitions (if include-private?
+                                    var-definitions
+                                    (filter #(not (:private %)) var-definitions))
+              
+              defined-vars (set (map (juxt :ns :name) filtered-definitions))
+              used-vars (set (map (juxt :to :name) var-usages))
+              unused-vars (set/difference defined-vars used-vars)
+              
+              ;; Get full definitions for unused vars
+              unused-definitions (->> filtered-definitions
+                                     (filter (fn [def]
+                                               (contains? unused-vars [(:ns def) (:name def)])))
+                                     (map #(select-keys % [:ns :name :filename :row :col :tag :private]))
+                                     vec)]
+          
+          {:unused-vars unused-definitions
+           :total-definitions (count filtered-definitions)
+           :total-unused (count unused-definitions)
+           :status :success})
+        analysis-result))
+    
+    (catch Exception e
+      (log/log! {:level :error :msg "Find unused vars failed" 
+                 :data {:error (.getMessage e) :paths paths}})
+      {:error (.getMessage e) :status :error})))
+
+(defn find-var-definitions
+  "Find all var definitions in a project with optional filtering"
+  [paths & {:keys [config namespace-filter name-filter tag-filter] :or {config {}}}]
+  (try
+    (log/log! {:level :info :msg "Finding var definitions" 
+               :data {:paths paths :filters {:namespace namespace-filter 
+                                            :name name-filter 
+                                            :tag tag-filter}}})
+    
+    (let [analysis-result (analyze-project paths :config config)]
+      (if (= (:status analysis-result) :success)
+        (let [var-definitions (get-in analysis-result [:analysis :var-definitions])
+              
+              ;; Apply filters
+              filtered-definitions (cond->> var-definitions
+                                     namespace-filter (filter #(= (str (:ns %)) (str namespace-filter)))
+                                     name-filter (filter #(= (str (:name %)) (str name-filter)))
+                                     tag-filter (filter #(= (:tag %) tag-filter)))
+              
+              formatted-definitions (map #(select-keys % [:ns :name :filename :row :col :tag :private :arity]) 
+                                         filtered-definitions)]
+          
+          {:var-definitions formatted-definitions
+           :total-found (count formatted-definitions)
+           :status :success})
+        analysis-result))
+    
+    (catch Exception e
+      (log/log! {:level :error :msg "Find var definitions failed" 
+                 :data {:error (.getMessage e) :paths paths}})
+      {:error (.getMessage e) :status :error})))
+
+(defn find-var-usages
+  "Find all usages of specific vars in a project"
+  [paths & {:keys [config namespace-filter name-filter] :or {config {}}}]
+  (try
+    (log/log! {:level :info :msg "Finding var usages" 
+               :data {:paths paths :filters {:namespace namespace-filter :name name-filter}}})
+    
+    (let [analysis-result (analyze-project paths :config config)]
+      (if (= (:status analysis-result) :success)
+        (let [var-usages (get-in analysis-result [:analysis :var-usages])
+              
+              ;; Apply filters
+              filtered-usages (cond->> var-usages
+                                namespace-filter (filter #(= (str (:to %)) (str namespace-filter)))
+                                name-filter (filter #(= (str (:name %)) (str name-filter))))
+              
+              formatted-usages (map #(select-keys % [:to :name :filename :row :col :from]) 
+                                   filtered-usages)]
+          
+          {:var-usages formatted-usages
+           :total-found (count formatted-usages)
+           :status :success})
+        analysis-result))
+    
+    (catch Exception e
+      (log/log! {:level :error :msg "Find var usages failed" 
+                 :data {:error (.getMessage e) :paths paths}})
+      {:error (.getMessage e) :status :error})))
+
 ;; ===============================================
 ;; Tool Implementations
 ;; ===============================================
@@ -142,6 +269,77 @@
                         (:message result)
                         (str "Error: " (:error result)))}]}))
 
+(defn analyze-project-tool [mcp-context arguments]
+  (let [{:keys [paths config]} arguments
+        result (analyze-project paths :config (or config {}))]
+    {:content [{:type "text" 
+                :text (if (= (:status result) :success)
+                        (str "Project analysis completed\n"
+                             "Definitions: " (count (get-in result [:analysis :var-definitions])) "\n"
+                             "Usages: " (count (get-in result [:analysis :var-usages])) "\n"
+                             "Findings: " (count (:findings result)))
+                        (str "Error: " (:error result)))}]}))
+
+(defn find-unused-vars-tool [mcp-context arguments]
+  (let [{:keys [paths config include-private]} arguments
+        result (find-unused-vars paths 
+                                :config (or config {})
+                                :include-private? (if (nil? include-private) true include-private))]
+    {:content [{:type "text" 
+                :text (if (= (:status result) :success)
+                        (if (seq (:unused-vars result))
+                          (str "Found " (:total-unused result) " unused vars out of " (:total-definitions result) " total definitions:\n"
+                               (str/join "\n" 
+                                 (map (fn [var]
+                                        (str (:ns var) "/" (:name var) 
+                                             " (" (:filename var) ":" (:row var) ":" (:col var) ")"
+                                             (when (:tag var) (str " [" (:tag var) "]"))
+                                             (when (:private var) " [private]")))
+                                      (:unused-vars result))))
+                          (str "No unused vars found (analyzed " (:total-definitions result) " definitions)"))
+                        (str "Error: " (:error result)))}]}))
+
+(defn find-var-definitions-tool [mcp-context arguments]
+  (let [{:keys [paths config namespace-filter name-filter tag-filter]} arguments
+        result (find-var-definitions paths 
+                                    :config (or config {})
+                                    :namespace-filter namespace-filter
+                                    :name-filter name-filter
+                                    :tag-filter (when tag-filter (keyword tag-filter)))]
+    {:content [{:type "text" 
+                :text (if (= (:status result) :success)
+                        (if (seq (:var-definitions result))
+                          (str "Found " (:total-found result) " var definitions:\n"
+                               (str/join "\n" 
+                                 (map (fn [var]
+                                        (str (:ns var) "/" (:name var) 
+                                             " (" (:filename var) ":" (:row var) ":" (:col var) ")"
+                                             (when (:tag var) (str " [" (:tag var) "]"))
+                                             (when (:private var) " [private]")
+                                             (when (:arity var) (str " arity:" (:arity var)))))
+                                      (:var-definitions result))))
+                          "No var definitions found matching the criteria")
+                        (str "Error: " (:error result)))}]}))
+
+(defn find-var-usages-tool [mcp-context arguments]
+  (let [{:keys [paths config namespace-filter name-filter]} arguments
+        result (find-var-usages paths 
+                               :config (or config {})
+                               :namespace-filter namespace-filter
+                               :name-filter name-filter)]
+    {:content [{:type "text" 
+                :text (if (= (:status result) :success)
+                        (if (seq (:var-usages result))
+                          (str "Found " (:total-found result) " var usages:\n"
+                               (str/join "\n" 
+                                 (map (fn [usage]
+                                        (str (:to usage) "/" (:name usage) 
+                                             " used in " (:from usage)
+                                             " (" (:filename usage) ":" (:row usage) ":" (:col usage) ")"))
+                                      (:var-usages result))))
+                          "No var usages found matching the criteria")
+                        (str "Error: " (:error result)))}]}))
+
 ;; ===============================================
 ;; Tool Definitions
 ;; ===============================================
@@ -175,4 +373,42 @@
                               :copy-configs {:type "boolean" :description "Copy configurations from dependencies (default: true)"}
                               :dependencies {:type "boolean" :description "Analyze dependencies for config (default: false)"}}
                   :required ["project-root"]}
-    :tool-fn setup-clj-kondo-tool}])
+    :tool-fn setup-clj-kondo-tool}
+   
+   {:name "analyze-project"
+    :description "Get full clj-kondo analysis data for a project"
+    :inputSchema {:type "object"
+                  :properties {:paths {:type "array" :description "Array of file paths or directories to analyze"}
+                              :config {:type "object" :description "Custom clj-kondo configuration as EDN map"}}
+                  :required ["paths"]}
+    :tool-fn analyze-project-tool}
+   
+   {:name "find-unused-vars"
+    :description "Find all unused vars in a project using clj-kondo analysis"
+    :inputSchema {:type "object"
+                  :properties {:paths {:type "array" :description "Array of file paths or directories to analyze"}
+                              :config {:type "object" :description "Custom clj-kondo configuration as EDN map"}
+                              :include-private {:type "boolean" :description "Include private vars in analysis (default: true)"}}
+                  :required ["paths"]}
+    :tool-fn find-unused-vars-tool}
+   
+   {:name "find-var-definitions"
+    :description "Find var definitions in a project with optional filtering"
+    :inputSchema {:type "object"
+                  :properties {:paths {:type "array" :description "Array of file paths or directories to analyze"}
+                              :config {:type "object" :description "Custom clj-kondo configuration as EDN map"}
+                              :namespace-filter {:type "string" :description "Filter by namespace name"}
+                              :name-filter {:type "string" :description "Filter by var name"}
+                              :tag-filter {:type "string" :description "Filter by tag (e.g., 'function', 'macro')"}}
+                  :required ["paths"]}
+    :tool-fn find-var-definitions-tool}
+   
+   {:name "find-var-usages"
+    :description "Find var usages in a project with optional filtering"
+    :inputSchema {:type "object"
+                  :properties {:paths {:type "array" :description "Array of file paths or directories to analyze"}
+                              :config {:type "object" :description "Custom clj-kondo configuration as EDN map"}
+                              :namespace-filter {:type "string" :description "Filter by target namespace"}
+                              :name-filter {:type "string" :description "Filter by var name"}}
+                  :required ["paths"]}
+    :tool-fn find-var-usages-tool}])
