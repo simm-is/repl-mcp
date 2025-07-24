@@ -1,8 +1,7 @@
 (ns is.simm.repl-mcp.tools.profiling
-  (:require [is.simm.repl-mcp.interactive :refer [register-tool!]]
-            [nrepl.core :as nrepl]
-            [taoensso.telemere :as log]
-            [clojure.string :as str])
+  (:require [taoensso.telemere :as log]
+            [clojure.string :as str]
+            [is.simm.repl-mcp.tools.nrepl-utils :as nrepl-utils])
   (:import [java.time Instant]))
 
 ;; Helper functions for profiling data analysis
@@ -136,8 +135,8 @@
 
 (defn profile-expression-comprehensive
   "Profile a Clojure expression and return comprehensive analysis"
-  [nrepl-client code-str & {:keys [event duration generate-flamegraph namespace top-k]
-                            :or {event :cpu duration 5000 generate-flamegraph false top-k 10}}]
+  [nrepl-client code-str & {:keys [event duration generate-flamegraph namespace top-k timeout]
+                            :or {event :cpu duration 5000 generate-flamegraph false top-k 10 timeout 120000}}]
   (try
     (log/log! {:level :info :msg "Starting comprehensive profiling" 
                :data {:code code-str :event event :duration duration}})
@@ -166,59 +165,55 @@
            code-str
            generate-flamegraph)
           
-          ;; Execute profiling in nREPL
+          ;; Execute profiling in nREPL using safe utilities
           _ (log/log! {:level :debug :msg "Sending profiling code to nREPL"
                        :data {:profiling-code-length (count profiling-code)
                               :profiling-code (subs profiling-code 0 (min 200 (count profiling-code)))}})
-          responses (nrepl/message nrepl-client {:op "eval" :code profiling-code :timeout 10000})
-          combined (nrepl/combine-responses responses)
+          
+          nrepl-result (nrepl-utils/safe-nrepl-message nrepl-client 
+                                                       {:op "eval" :code profiling-code}
+                                                       :timeout timeout
+                                                       :operation-name "Profile execution")
           
           end-time (System/currentTimeMillis)]
       
-      (log/log! {:level :debug :msg "Profiling nREPL responses" 
-                 :data {:response-count (count responses)}})
+      (log/log! {:level :debug :msg "Profiling nREPL result" 
+                 :data {:status (:status nrepl-result)}})
       
-      (log/log! {:level :debug :msg "Combined response" 
-                 :data {:combined combined :values (nrepl/response-values responses)}})
-      
-      (if (:err combined)
-        {:error (:err combined) :status :error}
-        
-        (let [response-values (:value combined)
-              first-value (first response-values)]
+      (if (= (:status nrepl-result) :success)
+        (let [eval-result (nrepl-utils/process-eval-response (:responses nrepl-result))]
           
-          (log/log! {:level :debug :msg "Response analysis"
-                     :data {:response-values-count (count response-values)
-                            :first-value-exists (boolean first-value)
-                            :first-value-length (when first-value (count first-value))}})
+          (log/log! {:level :debug :msg "Eval result analysis"
+                     :data {:status (:status eval-result)}})
           
-          (if (empty? response-values)
-            {:error "No response values from profiling" :status :error}
+          (if (= (:status eval-result) :success)
+            (let [result-data (read-string (:value eval-result))
+                  {:keys [result duration-ms raw-file dense-data]} result-data
+                  
+                  ;; Analyze the profiling data
+                  analysis (analyze-profile-data dense-data event duration-ms :top-k top-k)
+                  
+                  ;; Build comprehensive response
+                  comprehensive-result
+                  (merge analysis
+                         {:result result
+                          :files {:raw-data raw-file
+                                  :flamegraph (when generate-flamegraph
+                                               (str/replace raw-file "-collapsed.txt" "-flamegraph.html"))}
+                          :metadata {:start-time (Instant/ofEpochMilli start-time)
+                                     :end-time (Instant/ofEpochMilli end-time)
+                                     :profiler-version "3.0"
+                                     :jvm-info {:version (System/getProperty "java.version")
+                                                :vendor (System/getProperty "java.vendor")}}})]
+              
+              (log/log! {:level :info :msg "Profiling completed successfully"
+                         :data {:total-samples (get-in comprehensive-result [:summary :total-samples])}})
+              
+              comprehensive-result)
             
-            (let [result-data (read-string first-value)
-              {:keys [result duration-ms raw-file dense-data]} result-data
-              
-              ;; Analyze the profiling data
-              analysis (analyze-profile-data dense-data event duration-ms :top-k top-k)
-              
-              ;; Build comprehensive response
-              comprehensive-result
-              (merge analysis
-                     {:result result
-                      :files {:raw-data raw-file
-                              :flamegraph (when generate-flamegraph
-                                           (str/replace raw-file "-collapsed.txt" "-flamegraph.html"))}
-                      :metadata {:start-time (Instant/ofEpochMilli start-time)
-                                 :end-time (Instant/ofEpochMilli end-time)
-                                 :profiler-version "3.0"
-                                 :jvm-info {:version (System/getProperty "java.version")
-                                            :vendor (System/getProperty "java.vendor")}}})]
-          
-          (log/log! {:level :info :msg "Profiling completed successfully"
-                     :data {:total-samples (get-in comprehensive-result [:summary :total-samples])
-                            :top-frame (first (get comprehensive-result :top-frames))}})
-          
-          comprehensive-result)))))
+            {:error (:error eval-result) :status :error}))
+        
+        {:error (:error nrepl-result) :status :error}))
     
     (catch Exception e
       (log/log! {:level :error :msg "Profiling failed" :data {:error (.getMessage e)}})
@@ -241,7 +236,7 @@
                                (map #(format-tree-node % (inc depth) max-depth) 
                                     (take 5 (sort-by :total-samples > (:children node)))))))))))
 
-(defn format-comprehensive-profile-result
+(defn format-profile-result
   "Format profile result for readable MCP output with multiple navigation views"
   [result]
   (let [{:keys [summary all-functions hot-paths call-tree]} result
@@ -290,159 +285,100 @@
     
     (str header top-functions tree-view hot-paths-view data-info)))
 
-;; MCP Tool Registration
+;; ===============================================
+;; Tool Implementations
+;; ===============================================
 
-(register-tool! :profile-cpu
-  "Profile CPU usage of Clojure code with comprehensive analysis"
-  {:code {:type "string" :description "Clojure expression to profile"}
-   :duration {:type "number" :optional true :description "Profile duration in milliseconds (default: 5000)"}
-   :generate-flamegraph {:type "boolean" :optional true :description "Generate flamegraph file (default: false)"}
-   :namespace {:type "string" :optional true :description "Namespace context"}
-   :top-k {:type "number" :optional true :description "Number of top frames to show (default: 10)"}}
-  (fn [tool-call context]
-    (try
-      (let [{:strs [code duration generate-flamegraph namespace top-k]} (:args tool-call)
-            nrepl-client (:nrepl-client context)]
-        (log/log! {:level :info :msg "CPU profiling tool called"
-                   :data {:code code :duration duration :generate-flamegraph generate-flamegraph}})
-        
-        (when (nil? nrepl-client)
-          (throw (Exception. "nREPL client not available")))
-        
+(defn profile-cpu-tool [mcp-context arguments]
+  (let [{:keys [code duration generate-flamegraph namespace top-k]} arguments]
+    (log/log! {:level :info :msg "CPU profiling tool called"
+               :data {:code code :duration duration :generate-flamegraph generate-flamegraph}})
+    
+    (nrepl-utils/with-safe-nrepl mcp-context "CPU profiling"
+      (fn [nrepl-client timeout]
         (let [result (profile-expression-comprehensive 
-                      nrepl-client code
-                      :event :cpu
-                      :duration (or duration 5000)
-                      :generate-flamegraph (boolean generate-flamegraph)
-                      :namespace namespace
-                      :top-k (or top-k 10))]
-          
-          ;; Store result in a temporary var for interactive exploration
+                       nrepl-client code
+                       :event :cpu
+                       :duration (or duration 5000)
+                       :generate-flamegraph (boolean generate-flamegraph)
+                       :namespace namespace
+                       :top-k (or top-k 10)
+                       :timeout timeout)]
           (if (= (:status result) :error)
             result
+            ;; Store result in a var for programmatic access  
             (let [timestamp (System/currentTimeMillis)
-                  var-name (str "profile-result-" timestamp)
-                  
-                  ;; Create variable for interactive exploration via code injection
-                  var-creation-code (format 
-                    "(do
-                       (require '[is.simm.repl-mcp.tools.performance :as perf])
-                       (def %s (perf/analyze-profile-data %s %s %s :top-k %s)))"
-                    var-name
-                    (pr-str (:raw-data result))
-                    (pr-str :cpu)
-                    (get-in result [:summary :duration-ms])
-                    (or top-k 10))
-                  var-responses (nrepl/message nrepl-client {:op "eval" :code var-creation-code :timeout 10000})
-                  
-                  ;; Log variable creation attempt
-                  _ (log/log! {:level :info :msg "Variable creation attempted"
-                              :data {:var-name var-name 
-                                     :var-creation-code-length (count var-creation-code)
-                                     :var-responses-count (count var-responses)}})
-                  
-                  ;; Check if variable creation succeeded
-                  var-combined (nrepl/combine-responses var-responses)
-                  _ (log/log! {:level :info :msg "Variable creation result"
-                              :data {:var-combined var-combined
-                                     :var-err (:err var-combined)
-                                     :var-values (:value var-combined)}})
-                  
-                  ;; Create schema documentation
-                  schema-doc (str "Profile Result Schema for " var-name ":\n"
-                                 "• :summary - Basic statistics (samples, duration, etc.)\n"
-                                 "• :call-tree - Hierarchical call tree with self/total samples\n"
-                                 "• :all-functions - All functions sorted by sample count\n"
-                                 "• :hot-paths - Complete execution paths with full stack traces\n"
-                                 "• :all-stacks - All unique call stacks with samples\n"
-                                 "• :frame-index - ID to frame name mapping\n"
-                                 "• :raw-data - Original clj-async-profiler dense data\n\n"
-                                 "Example usage:\n"
-                                 (format "  (take 5 (:all-functions %s))\n" var-name)
-                                 (format "  (:summary %s)\n" var-name)
-                                 (format "  (-> %s :call-tree :children first)\n" var-name))]
+                  var-name (str "profile-cpu-result-" timestamp)
+                  var-symbol (symbol var-name)]
               
-              {:value (str (format-comprehensive-profile-result result) 
-                          "\n\n🔗 INTERACTIVE EXPLORATION:\n"
-                          "Result stored in var: " var-name "\n"
-                          "Use the eval tool to explore: (keys " var-name ")\n\n"
-                          schema-doc)
-               :data {:var-name var-name :result result}
-               :status :success}))))
-      (catch Exception e
-        (log/log! {:level :error :msg "CPU profiling tool failed" 
-                   :data {:error (.getMessage e) :tool-call tool-call}})
-        {:error (.getMessage e) :status :error})))
-  :tags #{:performance :profiling :cpu :analysis}
-  :dependencies #{:nrepl})
+              ;; Store the result directly in the user namespace without serialization
+              (intern 'user var-symbol result)
+              
+              {:status :success
+               :value (str (format-profile-result result)
+                         "\n\n🔗 INTERACTIVE EXPLORATION:\n"
+                         "Result stored in var: " var-name "\n"
+                         "Use eval tool to explore: (keys " var-name ")\n"
+                         "Available data: :summary, :call-tree, :all-functions, :hot-paths, :all-stacks, :frame-index, :raw-data")}))))
+      :timeout 120000)))
 
-(register-tool! :profile-alloc
-  "Profile memory allocation of Clojure code with comprehensive analysis"
-  {:code {:type "string" :description "Clojure expression to profile"}
-   :duration {:type "number" :optional true :description "Profile duration in milliseconds (default: 5000)"}
-   :generate-flamegraph {:type "boolean" :optional true :description "Generate flamegraph file (default: false)"}
-   :namespace {:type "string" :optional true :description "Namespace context"}
-   :top-k {:type "number" :optional true :description "Number of top frames to show (default: 10)"}}
-  (fn [tool-call context]
-    (try
-      (let [{:strs [code duration generate-flamegraph namespace top-k]} (:args tool-call)
-            nrepl-client (:nrepl-client context)]
-        (log/log! {:level :info :msg "Allocation profiling tool called"
-                   :data {:code code :duration duration}})
-        
-        (when (nil? nrepl-client)
-          (throw (Exception. "nREPL client not available")))
-        
+(defn profile-alloc-tool [mcp-context arguments]
+  (let [{:keys [code duration generate-flamegraph namespace top-k]} arguments]
+    (log/log! {:level :info :msg "Allocation profiling tool called"
+               :data {:code code :duration duration}})
+    
+    (nrepl-utils/with-safe-nrepl mcp-context "Memory allocation profiling"
+      (fn [nrepl-client timeout]
         (let [result (profile-expression-comprehensive 
-                      nrepl-client code
-                      :event :alloc
-                      :duration (or duration 5000)
-                      :generate-flamegraph (boolean generate-flamegraph)
-                      :namespace namespace
-                      :top-k (or top-k 10))]
-          
-          ;; Store result in a temporary var for interactive exploration
+                       nrepl-client code
+                       :event :alloc
+                       :duration (or duration 5000)
+                       :generate-flamegraph (boolean generate-flamegraph)
+                       :namespace namespace
+                       :top-k (or top-k 10)
+                       :timeout timeout)]
           (if (= (:status result) :error)
             result
+            ;; Store result in a var for programmatic access
             (let [timestamp (System/currentTimeMillis)
-                  var-name (str "alloc-result-" timestamp)
-                  
-                  ;; Create variable for interactive exploration via code injection
-                  var-creation-code (format 
-                    "(do
-                       (require '[is.simm.repl-mcp.tools.performance :as perf])
-                       (def %s (perf/analyze-profile-data %s %s %s :top-k %s)))"
-                    var-name
-                    (pr-str (:raw-data result))
-                    (pr-str :alloc)
-                    (get-in result [:summary :duration-ms])
-                    (or top-k 10))
-                  var-responses (nrepl/message nrepl-client {:op "eval" :code var-creation-code :timeout 10000})
-                  
-                  ;; Create schema documentation
-                  schema-doc (str "Allocation Profile Result Schema for " var-name ":\n"
-                                 "• :summary - Basic statistics (samples, duration, etc.)\n"
-                                 "• :call-tree - Hierarchical call tree with self/total samples\n"
-                                 "• :all-functions - All functions sorted by allocation count\n"
-                                 "• :hot-paths - Complete execution paths with full stack traces\n"
-                                 "• :all-stacks - All unique call stacks with samples\n"
-                                 "• :frame-index - ID to frame name mapping\n"
-                                 "• :raw-data - Original clj-async-profiler dense data\n\n"
-                                 "Example usage:\n"
-                                 (format "  (take 5 (:all-functions %s))\n" var-name)
-                                 (format "  (:summary %s)\n" var-name)
-                                 (format "  (-> %s :call-tree :children first)\n" var-name))]
+                  var-name (str "profile-alloc-result-" timestamp)
+                  var-symbol (symbol var-name)]
               
-              {:value (str (format-comprehensive-profile-result result) 
-                          "\n\n🔗 INTERACTIVE EXPLORATION:\n"
-                          "Result stored in var: " var-name "\n"
-                          "Use the eval tool to explore: (keys " var-name ")\n\n"
-                          schema-doc)
-               :data {:var-name var-name :result result}
-               :status :success}))))
-      (catch Exception e
-        (log/log! {:level :error :msg "Allocation profiling tool failed" 
-                   :data {:error (.getMessage e) :tool-call tool-call}})
-        {:error (.getMessage e) :status :error})))
-  :tags #{:performance :profiling :allocation :memory}
-  :dependencies #{:nrepl})
+              ;; Store the result directly in the user namespace without serialization
+              (intern 'user var-symbol result)
+              
+              {:status :success
+               :value (str (format-profile-result result)
+                         "\n\n🔗 INTERACTIVE EXPLORATION:\n"
+                         "Result stored in var: " var-name "\n"
+                         "Use eval tool to explore: (keys " var-name ")\n"
+                         "Available data: :summary, :call-tree, :all-functions, :hot-paths, :all-stacks, :frame-index, :raw-data")}))))
+      :timeout 120000)))
+
+;; ===============================================
+;; Tool Definitions
+;; ===============================================
+
+(def tools
+  "Profiling tool definitions for mcp-toolkit"
+  [{:name "profile-cpu"
+    :description "Profile CPU usage of Clojure code with comprehensive analysis"
+    :inputSchema {:type "object"
+                  :properties {:code {:type "string" :description "Clojure expression to profile"}
+                              :duration {:type "number" :description "Profile duration in milliseconds (default: 5000)"}
+                              :generate-flamegraph {:type "boolean" :description "Generate flamegraph file (default: false)"}
+                              :namespace {:type "string" :description "Namespace context"}
+                              :top-k {:type "number" :description "Number of top frames to show (default: 10)"}}
+                  :required ["code"]}
+    :tool-fn profile-cpu-tool}
+   
+   {:name "profile-alloc"
+    :description "Profile memory allocation of Clojure code with comprehensive analysis"
+    :inputSchema {:type "object"
+                  :properties {:code {:type "string" :description "Clojure expression to profile"}
+                              :duration {:type "number" :description "Profile duration in milliseconds (default: 5000)"}
+                              :generate-flamegraph {:type "boolean" :description "Generate flamegraph file (default: false)"}
+                              :namespace {:type "string" :description "Namespace context"}
+                              :top-k {:type "number" :description "Number of top frames to show (default: 10)"}}
+                  :required ["code"]}
+    :tool-fn profile-alloc-tool}])

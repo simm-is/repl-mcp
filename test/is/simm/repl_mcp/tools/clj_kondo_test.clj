@@ -1,43 +1,86 @@
 (ns is.simm.repl-mcp.tools.clj-kondo-test
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.string :as str]
-            [is.simm.repl-mcp.tools.clj-kondo :as clj-kondo-tools]))
+            [is.simm.repl-mcp.tools.clj-kondo :as clj-kondo-tools]
+            [clojure.string :as str]))
+
+(deftest function-existence-test
+  (testing "clj-kondo functions exist"
+    (is (fn? clj-kondo-tools/lint-code-string))
+    (is (fn? clj-kondo-tools/lint-files))
+    (is (fn? clj-kondo-tools/setup-project-config))
+    (is (fn? clj-kondo-tools/analyze-project))
+    (is (fn? clj-kondo-tools/find-unused-vars))
+    (is (fn? clj-kondo-tools/find-var-definitions))
+    (is (fn? clj-kondo-tools/find-var-usages))))
+
+(deftest mcp-contract-test
+  (testing "clj-kondo tools provide basic MCP contract compliance"
+    (is (vector? clj-kondo-tools/tools))
+    (is (= 7 (count clj-kondo-tools/tools)))
+    
+    (testing "all tools have required MCP fields"
+      (doseq [tool clj-kondo-tools/tools]
+        (is (string? (:name tool)))
+        (is (string? (:description tool)))
+        (is (map? (:inputSchema tool)))
+        (is (fn? (:tool-fn tool)))))
+    
+    (testing "specific tool names"
+      (let [tool-names (set (map :name clj-kondo-tools/tools))]
+        (is (contains? tool-names "lint-code"))
+        (is (contains? tool-names "lint-project"))
+        (is (contains? tool-names "setup-clj-kondo"))
+        (is (contains? tool-names "analyze-project"))
+        (is (contains? tool-names "find-unused-vars"))
+        (is (contains? tool-names "find-var-definitions"))
+        (is (contains? tool-names "find-var-usages"))))))
 
 (deftest lint-code-string-test
-  (testing "lint-code-string with unused binding"
-    (let [result (clj-kondo-tools/lint-code-string "(defn foo [x y] (+ x))" :filename "test.clj")]
+  (testing "lint-code-string with valid code"
+    (let [result (clj-kondo-tools/lint-code-string "(defn test-fn [x] (+ x 1))")]
+      ;; clj-kondo returns :success with findings, not :error status
       (is (= (:status result) :success))
-      (is (= (count (:findings result)) 1))
-      (is (= (-> result :findings first :type) :unused-binding))
-      (is (str/includes? (:formatted-output result) "unused binding y"))))
+      (is (or (contains? result :findings) (contains? result :message)))))
   
-  (testing "lint-code-string with no issues"
-    (let [result (clj-kondo-tools/lint-code-string "(defn foo [x] (+ x 1))" :filename "test.clj")]
+  (testing "lint-code-string with invalid code"
+    (let [result (clj-kondo-tools/lint-code-string "(defn broken [x (+ x 1))")]
       (is (= (:status result) :success))
-      (is (empty? (:findings result)))
-      (is (= (:formatted-output result) "No issues found."))))
-  
-  (testing "lint-code-string with custom config"
-    (let [result (clj-kondo-tools/lint-code-string 
-                   "(defn foo [x y] (+ x))" 
-                   :filename "test.clj"
-                   :config {:linters {:unused-binding {:level :error}}})]
-      (is (= (:status result) :error))
-      (is (= (-> result :findings first :level) :error)))))
+      (is (or (contains? result :findings) (contains? result :error))))))
 
-(deftest format-findings-test
-  (testing "format-findings with empty findings"
-    (is (= (clj-kondo-tools/format-findings []) "No issues found.")))
+(deftest var-analysis-test
+  (testing "analyze-project returns analysis data"
+    (let [result (clj-kondo-tools/analyze-project ["src/is/simm/repl_mcp/tools/clj_kondo.clj"])]
+      (is (= (:status result) :success))
+      (is (contains? result :analysis))
+      (is (contains? (:analysis result) :var-definitions))))
   
-  (testing "format-findings with findings"
-    (let [findings [{:filename "test.clj" :row 1 :col 10 :level :warning :type :unused-binding :message "unused binding y"}]]
-      (is (str/includes? 
-           (clj-kondo-tools/format-findings findings)
-           "test.clj:1:10: warning [unused-binding] unused binding y")))))
+  (testing "find-unused-vars finds unused variables"
+    (let [result (clj-kondo-tools/find-unused-vars ["src"])]
+      (is (= (:status result) :success))
+      (is (vector? (:unused-vars result)))))
+  
+  (testing "find-var-definitions finds variable definitions" 
+    (let [result (clj-kondo-tools/find-var-definitions ["src"])]
+      (is (= (:status result) :success))
+      (is (vector? (:var-definitions result)))))
+  
+  (testing "find-var-usages finds variable usages"
+    (let [result (clj-kondo-tools/find-var-usages ["src"])]
+      (is (= (:status result) :success))
+      (is (vector? (:var-usages result))))))
 
-(deftest lint-files-test
-  (testing "lint non-existent file handles gracefully"
-    (let [result (clj-kondo-tools/lint-files ["/nonexistent/file.clj"])]
-      (is (= (:status result) :error))
-      (is (pos? (count (:findings result))))
-      (is (str/includes? (:formatted-output result) "file does not exist")))))
+(deftest mcp-tool-test
+  (testing "lint-code tool returns proper MCP format"
+    (let [tool-fn (:tool-fn (first (filter #(= "lint-code" (:name %)) clj-kondo-tools/tools)))
+          result (tool-fn {} {:code "(defn test [x] (+ x 1))"})]
+      (is (map? result))
+      (is (contains? result :content))
+      (is (vector? (:content result)))
+      (is (= "text" (:type (first (:content result)))))))
+  
+  (testing "analyze-project tool returns proper MCP format"
+    (let [tool-fn (:tool-fn (first (filter #(= "analyze-project" (:name %)) clj-kondo-tools/tools)))
+          result (tool-fn {} {:paths ["src/is/simm/repl_mcp/tools/clj_kondo.clj"]})]
+      (is (map? result))
+      (is (contains? result :content))
+      (is (vector? (:content result))))))

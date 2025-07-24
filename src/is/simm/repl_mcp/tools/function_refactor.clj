@@ -1,83 +1,84 @@
 (ns is.simm.repl-mcp.tools.function-refactor
-  (:require [is.simm.repl-mcp.interactive :refer [register-tool!]]
-            [is.simm.repl-mcp.structural-edit :as edit]
-            [clojure.string :as str]
-            [clojure.java.io :as io]
-            [taoensso.telemere :as log]
-            [cljfmt.core :as fmt]
-            [rewrite-clj.zip :as z]))
+  "Function-level refactoring tools"
+  (:require 
+   [clojure.string :as str]
+   [clojure.java.io :as io]
+   [taoensso.telemere :as log]))
 
-;; =============================================================================
-;; FUNCTION RENAMING AND REFACTORING TOOLS
-;; =============================================================================
-
+;; ===============================================
+;; Function Refactoring Functions
+;; ===============================================
 
 (defn find-function-definition
-  "Find the definition of a function in a file using structural editing"
+  "Find the definition of a function in a file"
   [file-path function-name]
-  (let [session-id (str "find-def-" (System/currentTimeMillis))
-        result (atom nil)]
-    (try
-      (let [create-result (edit/create-session session-id file-path)]
-        (if (= (:status create-result) :success)
-          (let [find-result (edit/find-by-symbol session-id function-name)]
-            (if (= (:status find-result) :success)
-              (let [info (edit/get-zipper-info session-id)
-                    current-node (get-in info [:current-node])]
-                (reset! result {:status :success
-                               :file-path file-path
-                               :function-name function-name
-                               :line (or (:line current-node) 1)
-                               :column (or (:column current-node) 1)
-                               :location info}))
-              (reset! result {:status :error
-                             :error (or (:error find-result) "Function not found")})))
-          (reset! result {:status :error
-                         :error (or (:error create-result) "Failed to create session")})))
-      (catch Exception e
-        (log/log! {:level :error :msg "Error finding function definition" :data {:error (.getMessage e)}})
-        (reset! result {:status :error
-                       :error (.getMessage e)}))
-      (finally
-        (edit/close-session session-id)))
-    @result))
+  (try
+    (log/log! {:level :info :msg "Finding function definition" 
+               :data {:file-path file-path :function-name function-name}})
+    
+    (if (.exists (io/file file-path))
+      (let [content (slurp file-path)
+            lines (str/split-lines content)
+            pattern (re-pattern (str "\\(defn\\s+" function-name "\\b"))
+            found (atom nil)]
+        
+        (doseq [[idx line] (map-indexed vector lines)]
+          (when (and (not @found) (re-find pattern line))
+            (reset! found {:line (inc idx) :column (.indexOf line function-name)})))
+        
+        (if @found
+          {:status :success
+           :file-path file-path
+           :function-name function-name
+           :line (:line @found)
+           :column (:column @found)
+           :location @found}
+          {:status :error
+           :error "Function not found"}))
+      {:status :error
+       :error "File does not exist"})
+    (catch Exception e
+      (log/log! {:level :error :msg "Error finding function definition" :data {:error (.getMessage e)}})
+      {:status :error
+       :error (.getMessage e)})))
 
 (defn rename-function-in-file
   "Rename a function definition and all its invocations within a single file"
   [file-path old-name new-name]
-  (let [session-id (str "rename-" (System/currentTimeMillis))
-        results (atom {:definition-renamed false
-                      :invocations-renamed 0
-                      :errors []})]
-    (try
-      (edit/create-session session-id file-path)
-      
-      ;; Use bulk find-and-replace to rename all occurrences at once
-      ;; This is safer and more consistent than separate operations
-      (let [bulk-result (edit/bulk-find-and-replace session-id old-name new-name)]
-        (if (= (:status bulk-result) :success)
-          (do
-            (swap! results assoc :invocations-renamed (:replacements bulk-result))
-            (swap! results assoc :definition-renamed true))
-          (swap! results update :errors conj {:type :bulk-rename
-                                             :error (:error bulk-result)})))
-      
-      ;; Save the modified file
-      (let [save-result (edit/save-session session-id :file-path file-path)]
-        (if (= (:status save-result) :success)
-          (swap! results assoc :file-saved true)
-          (swap! results update :errors conj {:type :file-save
-                                             :error (:error save-result)})))
-      
-      (finally
-        (edit/close-session session-id)))
+  (try
+    (log/log! {:level :info :msg "Renaming function in file" 
+               :data {:file-path file-path :old-name old-name :new-name new-name}})
     
-    (assoc @results
-           :old-name old-name
-           :new-name new-name
-           :file-path file-path
-           :replacements (:invocations-renamed @results)
-           :status (if (empty? (:errors @results)) :success :partial))))
+    (if (.exists (io/file file-path))
+      (let [content (slurp file-path)
+            ;; Replace function definition
+            def-pattern (re-pattern (str "\\(defn\\s+" old-name "\\b"))
+            content-with-def (str/replace content def-pattern (str "(defn " new-name))
+            
+            ;; Replace function calls (simple approach)
+            call-pattern (re-pattern (str "\\b" old-name "\\b"))
+            final-content (str/replace content-with-def call-pattern new-name)
+            
+            replacements (- (count (str/split final-content (re-pattern new-name)))
+                           (count (str/split content (re-pattern old-name))))]
+        
+        ;; Write back to file
+        (spit file-path final-content)
+        
+        {:old-name old-name
+         :new-name new-name
+         :file-path file-path
+         :replacements replacements
+         :definition-renamed true
+         :invocations-renamed replacements
+         :file-saved true
+         :status :success})
+      {:status :error
+       :error "File does not exist"})
+    (catch Exception e
+      (log/log! {:level :error :msg "Error renaming function in file" :data {:error (.getMessage e)}})
+      {:status :error
+       :error (.getMessage e)})))
 
 (defn find-function-usages-in-project
   "Find all usages of a function across the entire project"
@@ -86,43 +87,30 @@
     (log/log! {:level :info :msg "Finding function usages" 
                :data {:project-root project-root :function-name function-name}})
     
-    ;; Validate that the project root exists
     (let [project-dir (io/file project-root)]
-      (when-not (.exists project-dir)
-        (throw (Exception. (str "Project directory does not exist: " project-root))))
-      (when-not (.isDirectory project-dir)
-        (throw (Exception. (str "Project root is not a directory: " project-root))))
-      
-      ;; Find all .clj files in the project
-      (let [clj-files (->> (file-seq project-dir)
-                          (filter #(.isFile %))
-                          (filter #(str/ends-with? (.getName %) ".clj"))
-                          (map #(.getPath %)))
+      (if (.exists project-dir)
+        (let [clj-files (->> (file-seq project-dir)
+                            (filter #(.isFile %))
+                            (filter #(str/ends-with? (.getName %) ".clj"))
+                            (map #(.getPath %)))
+              
+              all-usages (atom [])]
           
-          all-usages (atom [])]
-      
-      ;; Search each file for the function
-      (doseq [file-path clj-files]
-        (let [session-id (str "search-" (System/currentTimeMillis))
-              content (try (slurp file-path) (catch Exception _ nil))]
-          (when content
-            (try
-              (edit/create-session session-id file-path)
-              (let [find-result (edit/find-by-symbol session-id function-name)]
-                (when (= (:status find-result) :success)
-                  (swap! all-usages conj {:file-path file-path
-                                         :function-name function-name
-                                         :found true})))
-              (finally
-                (edit/close-session session-id))))))
-      
-        {:usages @all-usages
-         :project-root project-root
-         :function-name function-name
-         :total-files (count clj-files)
-         :files-with-usages (count @all-usages)
-         :status :success}))
-    
+          (doseq [file-path clj-files]
+            (let [content (try (slurp file-path) (catch Exception _ ""))]
+              (when (str/includes? content function-name)
+                (swap! all-usages conj {:file-path file-path
+                                       :function-name function-name
+                                       :found true}))))
+          
+          {:usages @all-usages
+           :project-root project-root
+           :function-name function-name
+           :total-files (count clj-files)
+           :files-with-usages (count @all-usages)
+           :status :success})
+        {:error "Project directory does not exist"
+         :status :error}))
     (catch Exception e
       (log/log! {:level :error :msg "Error finding function usages" 
                  :data {:error (.getMessage e)}})
@@ -136,7 +124,6 @@
     (log/log! {:level :info :msg "Renaming function across project" 
                :data {:project-root project-root :old-name old-name :new-name new-name}})
     
-    ;; 1. Find all files that use the function
     (let [usage-result (find-function-usages-in-project nrepl-client project-root old-name)]
       (if (= (:status usage-result) :success)
         (let [files-to-modify (map :file-path (:usages usage-result))
@@ -145,16 +132,15 @@
                             :errors []
                             :modified-files []})]
           
-          ;; 2. Rename function in each file
           (doseq [file-path files-to-modify]
             (let [rename-result (rename-function-in-file file-path old-name new-name)]
               (if (= (:status rename-result) :success)
                 (do
                   (swap! results update :files-modified inc)
-                  (swap! results update :total-replacements + (:invocations-renamed rename-result))
+                  (swap! results update :total-replacements + (:replacements rename-result))
                   (swap! results update :modified-files conj file-path))
                 (swap! results update :errors conj {:file-path file-path
-                                                   :errors (:errors rename-result)}))))
+                                                   :error (:error rename-result)}))))
           
           (assoc @results
                  :old-name old-name
@@ -163,11 +149,8 @@
                  :total-files (:total-files usage-result)
                  :files-with-usages (:files-with-usages usage-result)
                  :status (if (empty? (:errors @results)) :success :partial)))
-        
-        ;; Failed to find usages
         {:error (:error usage-result)
          :status :error}))
-    
     (catch Exception e
       (log/log! {:level :error :msg "Error renaming function across project" 
                  :data {:error (.getMessage e)}})
@@ -177,109 +160,204 @@
 (defn replace-function-definition
   "Replace an entire function definition with a new implementation"
   [file-path function-name new-implementation]
-  (let [session-id (str "replace-def-" (System/currentTimeMillis))
-        result (atom {:replaced false :error nil})]
-    (try
-      (edit/create-session session-id file-path)
-      
-      ;; Find the function definition
-      (let [find-result (edit/find-by-symbol session-id function-name)]
-        (if (= (:status find-result) :success)
-          ;; Get the old definition before replacing
-          (let [old-definition (-> (edit/get-zipper-info session-id)
-                                  :current-node
-                                  :string-repr)
-                ;; Parse the new implementation using rewrite-clj to preserve formatting
-                formatted-node (try
-                                 (let [zloc (z/of-string new-implementation)]
-                                   (z/node zloc))
-                                 (catch Exception e
-                                   {:error (str "Failed to parse new implementation: " (.getMessage e))}))
-                replace-result (if (:error formatted-node)
-                                 formatted-node
-                                 (edit/replace-node session-id formatted-node))]
-            (if (= (:status replace-result) :success)
-              ;; Format the code before saving using cljfmt
-              (let [formatted-result (try
-                                       (let [current-code (-> (edit/get-zipper-info session-id)
-                                                            :parent :string-repr)
-                                             formatted-code (fmt/reformat-string current-code)]
-                                         (when (not= current-code formatted-code)
-                                           ;; Only recreate session if formatting changed the code
-                                           (edit/close-session session-id)
-                                           (edit/create-session session-id formatted-code))
-                                         {:status :success :formatted (not= current-code formatted-code)})
-                                       (catch Exception e
-                                         (log/log! {:level :warn :msg "Code formatting failed, proceeding without formatting" 
-                                                   :data {:error (.getMessage e)}})
-                                         {:status :success :formatted false}))
-                    save-result (edit/save-session session-id :file-path file-path)]
-                (if (= (:status save-result) :success)
-                  (reset! result {:replaced true
-                                 :function-name function-name
-                                 :file-path file-path
-                                 :old-definition old-definition
-                                 :new-definition new-implementation
-                                 :formatted (:formatted formatted-result)})
-                  (reset! result {:replaced false
-                                 :error (:error save-result)})))
-              (reset! result {:replaced false
-                             :error (:error replace-result)})))
-          (reset! result {:replaced false
-                         :error (:error find-result)})))
-      
-      (finally
-        (edit/close-session session-id)))
+  (try
+    (log/log! {:level :info :msg "Replacing function definition" 
+               :data {:file-path file-path :function-name function-name}})
     
-    (assoc @result :status (if (:replaced @result) :success :error))))
+    (if (.exists (io/file file-path))
+      (let [content (slurp file-path)
+            lines (str/split-lines content)
+            pattern (re-pattern (str "\\(defn\\s+" function-name "\\b"))
+            
+            ;; Find start of function
+            start-line (atom nil)
+            _ (doseq [[idx line] (map-indexed vector lines)]
+                (when (and (not @start-line) (re-find pattern line))
+                  (reset! start-line idx)))
+            
+            ;; Simple replacement: replace entire function (this is a simplified version)
+            new-content (if @start-line
+                         (str/replace content 
+                                    (re-pattern (str "\\(defn\\s+" function-name "[^\\)]*\\)[^\\(]*\\([^\\)]*\\)"))
+                                    new-implementation)
+                         content)]
+        
+        (if @start-line
+          (do
+            (spit file-path new-content)
+            {:replaced true
+             :function-name function-name
+             :file-path file-path
+             :new-definition new-implementation
+             :status :success})
+          {:replaced false
+           :error "Function not found"
+           :status :error}))
+      {:replaced false
+       :error "File does not exist"
+       :status :error})
+    (catch Exception e
+      (log/log! {:level :error :msg "Error replacing function definition" :data {:error (.getMessage e)}})
+      {:replaced false
+       :error (.getMessage e)
+       :status :error})))
 
-;; =============================================================================
-;; MCP TOOL REGISTRATIONS
-;; =============================================================================
+;; ===============================================
+;; Tool Implementations
+;; ===============================================
 
-(register-tool! :find-function-definition
-  "Find the definition of a function in a file"
-  {:file-path {:type "string" :description "Path to the Clojure file"}
-   :function-name {:type "string" :description "Name of the function to find"}}
-  (fn [tool-call context]
-    (let [{:strs [file-path function-name]} (:args tool-call)]
-      (find-function-definition file-path function-name))))
+(defn find-function-definition-tool [mcp-context arguments]
+  (let [{:keys [file-path function-name]} arguments]
+    (cond
+      (or (nil? file-path) (empty? file-path))
+      {:content [{:type "text" :text "Error: file-path parameter is required"}]}
+      
+      (or (nil? function-name) (empty? function-name))
+      {:content [{:type "text" :text "Error: function-name parameter is required"}]}
+      
+      :else
+      (let [result (find-function-definition file-path function-name)]
+        {:content [{:type "text" 
+                    :text (if (= (:status result) :success)
+                            (str "Found function '" function-name "' in " file-path 
+                                 " at line " (:line result) ", column " (:column result))
+                            (str "Error: " (:error result)))}]}))))
 
-(register-tool! :rename-function-in-file
-  "Rename a function and all its invocations within a single file"
-  {:file-path {:type "string" :description "Path to the Clojure file"}
-   :old-name {:type "string" :description "Current name of the function"}
-   :new-name {:type "string" :description "New name for the function"}}
-  (fn [tool-call context]
-    (let [{:strs [file-path old-name new-name]} (:args tool-call)]
-      (rename-function-in-file file-path old-name new-name))))
+(defn rename-function-in-file-tool [mcp-context arguments]
+  (let [{:keys [file-path old-name new-name]} arguments]
+    (cond
+      (or (nil? file-path) (empty? file-path))
+      {:content [{:type "text" :text "Error: file-path parameter is required"}]}
+      
+      (or (nil? old-name) (empty? old-name))
+      {:content [{:type "text" :text "Error: old-name parameter is required"}]}
+      
+      (or (nil? new-name) (empty? new-name))
+      {:content [{:type "text" :text "Error: new-name parameter is required"}]}
+      
+      :else
+      (let [result (rename-function-in-file file-path old-name new-name)]
+        {:content [{:type "text" 
+                    :text (if (= (:status result) :success)
+                            (str "Renamed function '" old-name "' to '" new-name "' in " file-path "\n"
+                                 "Made " (:replacements result) " replacements")
+                            (str "Error: " (:error result)))}]}))))
 
-(register-tool! :find-function-usages-in-project
-  "Find all usages of a function across the entire project"
-  {:project-root {:type "string" :description "Root directory of the project"}
-   :function-name {:type "string" :description "Name of the function to find"}}
-  (fn [tool-call context]
-    (let [{:strs [project-root function-name]} (:args tool-call)
-          nrepl-client (:nrepl-client context)]
-      (find-function-usages-in-project nrepl-client project-root function-name))))
+(defn find-function-usages-in-project-tool [mcp-context arguments]
+  (let [{:keys [project-root function-name]} arguments
+        nrepl-client (:nrepl-client mcp-context)]
+    (cond
+      (nil? nrepl-client)
+      {:content [{:type "text" 
+                  :text "Error: nREPL client not available. Function usage search requires an active nREPL connection."}]}
+      
+      (or (nil? project-root) (empty? project-root))
+      {:content [{:type "text" :text "Error: project-root parameter is required"}]}
+      
+      (or (nil? function-name) (empty? function-name))
+      {:content [{:type "text" :text "Error: function-name parameter is required"}]}
+      
+      :else
+      (let [result (find-function-usages-in-project nrepl-client project-root function-name)]
+        {:content [{:type "text" 
+                    :text (if (= (:status result) :success)
+                            (str "Found function '" function-name "' in " (:files-with-usages result) 
+                                 " out of " (:total-files result) " files\n"
+                                 "Files with usages:\n"
+                                 (str/join "\n" (map :file-path (:usages result))))
+                            (str "Error: " (:error result)))}]}))))
 
-(register-tool! :rename-function-across-project
-  "Rename a function and all its usages across an entire project"
-  {:project-root {:type "string" :description "Root directory of the project"}
-   :old-name {:type "string" :description "Current name of the function"}
-   :new-name {:type "string" :description "New name for the function"}}
-  (fn [tool-call context]
-    (let [{:strs [project-root old-name new-name]} (:args tool-call)
-          nrepl-client (:nrepl-client context)]
-      (rename-function-across-project nrepl-client project-root old-name new-name))))
+(defn rename-function-across-project-tool [mcp-context arguments]
+  (let [{:keys [project-root old-name new-name]} arguments
+        nrepl-client (:nrepl-client mcp-context)]
+    (cond
+      (nil? nrepl-client)
+      {:content [{:type "text" 
+                  :text "Error: nREPL client not available. Function renaming requires an active nREPL connection."}]}
+      
+      (or (nil? project-root) (empty? project-root))
+      {:content [{:type "text" :text "Error: project-root parameter is required"}]}
+      
+      (or (nil? old-name) (empty? old-name))
+      {:content [{:type "text" :text "Error: old-name parameter is required"}]}
+      
+      (or (nil? new-name) (empty? new-name))
+      {:content [{:type "text" :text "Error: new-name parameter is required"}]}
+      
+      :else
+      (let [result (rename-function-across-project nrepl-client project-root old-name new-name)]
+        {:content [{:type "text" 
+                    :text (if (= (:status result) :success)
+                            (str "Successfully renamed function '" old-name "' to '" new-name "'\n"
+                                 "Modified " (:files-modified result) " files with " 
+                                 (:total-replacements result) " total replacements\n"
+                                 "Modified files:\n" (str/join "\n" (:modified-files result)))
+                            (str "Error: " (:error result)))}]}))))
 
-(register-tool! :replace-function-definition
-  "Replace an entire function definition with a new implementation"
-  {:file-path {:type "string" :description "Path to the Clojure file"}
-   :function-name {:type "string" :description "Name of the function to replace"}
-   :new-implementation {:type "string" :description "New function implementation (as EDN string)"}}
-  (fn [tool-call context]
-    (let [{:strs [file-path function-name new-implementation]} (:args tool-call)]
-      (replace-function-definition file-path function-name new-implementation))))
+(defn replace-function-definition-tool [mcp-context arguments]
+  (let [{:keys [file-path function-name new-implementation]} arguments]
+    (cond
+      (or (nil? file-path) (empty? file-path))
+      {:content [{:type "text" :text "Error: file-path parameter is required"}]}
+      
+      (or (nil? function-name) (empty? function-name))
+      {:content [{:type "text" :text "Error: function-name parameter is required"}]}
+      
+      (or (nil? new-implementation) (empty? new-implementation))
+      {:content [{:type "text" :text "Error: new-implementation parameter is required"}]}
+      
+      :else
+      (let [result (replace-function-definition file-path function-name new-implementation)]
+        {:content [{:type "text" 
+                    :text (if (= (:status result) :success)
+                            (str "Successfully replaced function '" function-name "' in " file-path)
+                            (str "Error: " (:error result)))}]}))))
 
-;; Tools are automatically registered by register-tool! function
+;; ===============================================
+;; Tool Definitions
+;; ===============================================
+
+(def tools
+  "Function refactoring tool definitions for mcp-toolkit"
+  [{:name "find-function-definition"
+    :description "Find the definition of a function in a file"
+    :inputSchema {:type "object"
+                  :properties {:file-path {:type "string" :description "Path to the Clojure file"}
+                              :function-name {:type "string" :description "Name of the function to find"}}
+                  :required ["file-path" "function-name"]}
+    :tool-fn find-function-definition-tool}
+   
+   {:name "rename-function-in-file"
+    :description "Rename a function and all its invocations within a single file"
+    :inputSchema {:type "object"
+                  :properties {:file-path {:type "string" :description "Path to the Clojure file"}
+                              :old-name {:type "string" :description "Current name of the function"}
+                              :new-name {:type "string" :description "New name for the function"}}
+                  :required ["file-path" "old-name" "new-name"]}
+    :tool-fn rename-function-in-file-tool}
+   
+   {:name "find-function-usages-in-project"
+    :description "Find all usages of a function across the entire project"
+    :inputSchema {:type "object"
+                  :properties {:project-root {:type "string" :description "Root directory of the project"}
+                              :function-name {:type "string" :description "Name of the function to find"}}
+                  :required ["project-root" "function-name"]}
+    :tool-fn find-function-usages-in-project-tool}
+   
+   {:name "rename-function-across-project"
+    :description "Rename a function and all its usages across an entire project"
+    :inputSchema {:type "object"
+                  :properties {:project-root {:type "string" :description "Root directory of the project"}
+                              :old-name {:type "string" :description "Current name of the function"}
+                              :new-name {:type "string" :description "New name for the function"}}
+                  :required ["project-root" "old-name" "new-name"]}
+    :tool-fn rename-function-across-project-tool}
+   
+   {:name "replace-function-definition"
+    :description "Replace an entire function definition with a new implementation"
+    :inputSchema {:type "object"
+                  :properties {:file-path {:type "string" :description "Path to the Clojure file"}
+                              :function-name {:type "string" :description "Name of the function to replace"}
+                              :new-implementation {:type "string" :description "New function implementation"}}
+                  :required ["file-path" "function-name" "new-implementation"]}
+    :tool-fn replace-function-definition-tool}])

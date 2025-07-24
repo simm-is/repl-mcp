@@ -1,131 +1,216 @@
 (ns is.simm.repl-mcp.tools.structural-edit
-  (:require [is.simm.repl-mcp.interactive :refer [register-tool!]]
-            [is.simm.repl-mcp.structural-edit :as edit]
-            [clojure.edn :as edn]
-            [rewrite-clj.zip :as z]))
+  "Structural editing tools for Clojure code using rewrite-clj"
+  (:require 
+   [is.simm.repl-mcp.structural-edit :as edit]
+   [rewrite-clj.zip :as z]
+   [clojure.string :as str]))
 
 ;; =============================================================================
-;; STRUCTURAL EDITING TOOLS - ESSENTIAL ONLY
+;; STRUCTURAL EDITING TOOLS - SESSION MANAGEMENT
 ;; =============================================================================
 
-;; =============================================================================
-;; SESSION MANAGEMENT TOOLS
-;; =============================================================================
+(defn structural-create-session-fn [_mcp-context arguments]
+  (let [{:keys [session-id source from-file]} arguments
+        result (edit/create-session session-id source :from-file? (if (nil? from-file) true from-file))]
+    (if (= (:status result) :success)
+      {:content [{:type "text" :text (format "✓ Session '%s' created successfully" session-id)}]}
+      {:content [{:type "text" :text (format "✗ Failed to create session: %s" (:error result))}
+                 {:type "text" :text (format "Status: %s" (:status result))}]})))
 
-(register-tool! :structural-create-session
-  "Create a new structural editing session from file or code string"
-  {:session-id {:type "string" :description "Unique identifier for the session"}
-   :source {:type "string" :description "File path or code string to edit"}
-   :from-file {:type "boolean" :default true :optional true :description "Whether source is a file path (true) or code string (false)"}}
-  (fn [tool-call context]
-    (let [{:strs [session-id source from-file]} (:args tool-call)
-          result (edit/create-session session-id source :from-file? from-file)]
-      (if (= (:status result) :success)
-        (format "✓ Session '%s' created" session-id)
-        result))))
+(defn structural-list-sessions-fn [_mcp-context _arguments]
+  (let [sessions (edit/get-all-sessions)]
+    (if (empty? sessions)
+      {:content [{:type "text" :text "No active structural editing sessions."}]}
+      {:content [{:type "text" :text (format "Active sessions (%d):" (count sessions))}
+                 {:type "text" :text (str/join "\n" 
+                   (for [[id info] sessions]
+                     (format "- %s: %s (from-file: %s, history: %d operations)"
+                            id (:original-source info) (:from-file? info) (:history-count info))))}
+                 ]})))
 
-(register-tool! :structural-save-session
-  "Save structural editing session to file or get as string"
-  {:session-id {:type "string" :description "Session identifier"}
-   :file-path {:type "string" :optional true :description "Optional file path to save to (if not provided, returns as string)"}}
-  (fn [tool-call context]
-    (let [{:strs [session-id file-path]} (:args tool-call)
-          result (if file-path
-                   (edit/save-session session-id :file-path file-path)
-                   (edit/save-session session-id))]
-      result)))
+(defn structural-save-session-fn [_mcp-context arguments]
+  (let [{:keys [session-id file-path]} arguments
+        result (if file-path
+                  (edit/save-session session-id :file-path file-path)
+                  (edit/save-session session-id))]
+    (case (:status result)
+      :success (if file-path
+                 {:content [{:type "text" :text (format "✓ Session '%s' saved to %s" session-id (:file-path result))}]}
+                 {:content [{:type "text" :text (format "Session content:\n%s" (or (:code result) ""))}]})
+      :error   {:content [{:type "text" :text (format "✗ Failed to save session: %s" (:error result))}]})))
 
-(register-tool! :structural-close-session
-  "Close a structural editing session"
-  {:session-id {:type "string" :description "Session identifier"}}
-  (fn [tool-call context]
-    (let [{:strs [session-id]} (:args tool-call)]
-      (edit/close-session session-id))))
+(defn structural-close-session-fn [_mcp-context arguments]
+  (let [{:keys [session-id]} arguments
+        _result (edit/close-session session-id)]
+    {:content [{:type "text" :text (format "✓ Session '%s' closed successfully" session-id)}]}))
 
-(register-tool! :structural-get-info
-  "Get comprehensive information about current zipper position"
-  {:session-id {:type "string" :description "Session identifier"}}
-  (fn [tool-call context]
-    (let [{:strs [session-id]} (:args tool-call)]
-      (edit/get-zipper-info session-id))))
-
-(register-tool! :structural-list-sessions
-  "List all active structural editing sessions"
-  {}
-  (fn [tool-call _context]
-    {:status :success :sessions (edit/get-all-sessions)}))
-
-;; =============================================================================
-;; CORE STRUCTURAL EDITING TOOLS
-;; =============================================================================
-
-(register-tool! :structural-find-symbol
-  "Find symbols with matching including keywords and flexible patterns"
-  {:session-id {:type "string" :description "Session identifier"}
-   :symbol-name {:type "string" :description "Symbol name to find"}
-   :exact-match {:type "boolean" :default false :optional true :description "Whether to use exact matching"}
-   :case-sensitive {:type "boolean" :default true :optional true :description "Whether to use case-sensitive matching"}}
-  (fn [tool-call context]
-    (let [{:strs [session-id symbol-name exact-match case-sensitive]} (:args tool-call)]
-      (edit/find-by-symbol session-id symbol-name 
-                          :exact-match? exact-match 
-                          :case-sensitive? case-sensitive))))
-
-(register-tool! :structural-replace-node
-  "Replace current node with new expression"
-  {:session-id {:type "string" :description "Session identifier"}
-   :new-expression {:type "string" :description "New expression to replace current node"}}
-  (fn [tool-call context]
-    (let [{:strs [session-id new-expression]} (:args tool-call)]
-      ;; Use rewrite-clj parsing to preserve formatting instead of edn/read-string
-      (edit/replace-node session-id (z/node (z/of-string new-expression))))))
-
-(register-tool! :structural-insert-after
-  "Insert expression after current node with proper formatting"
-  {:session-id {:type "string" :description "Session identifier"}
-   :new-expression {:type "string" :description "New expression to insert after current node"}}
-  (fn [tool-call context]
-    (let [{:strs [session-id new-expression]} (:args tool-call)]
-      ;; Use rewrite-clj parsing to preserve formatting
-      (edit/insert-after session-id (z/node (z/of-string new-expression))))))
-
-(register-tool! :structural-insert-before
-  "Insert expression before current node with proper formatting"
-  {:session-id {:type "string" :description "Session identifier"}
-   :new-expression {:type "string" :description "New expression to insert before current node"}}
-  (fn [tool-call context]
-    (let [{:strs [session-id new-expression]} (:args tool-call)]
-      ;; Use rewrite-clj parsing to preserve formatting
-      (edit/insert-before session-id (z/node (z/of-string new-expression))))))
-
-(register-tool! :structural-bulk-find-and-replace
-  "Find and replace all occurrences of a pattern with enhanced symbol matching"
-  {:session-id {:type "string" :description "Session identifier"}
-   :find-pattern {:type "string" :description "Pattern to find"}
-   :replace-with {:type "string" :description "Replacement text"}
-   :exact-match {:type "boolean" :default false :optional true :description "Whether to use exact matching"}}
-  (fn [tool-call context]
-    (let [{:strs [session-id find-pattern replace-with exact-match]} (:args tool-call)]
-      (edit/bulk-find-and-replace session-id find-pattern replace-with 
-                                 :exact-match? exact-match))))
+(defn structural-get-info-fn [_mcp-context arguments]
+  (let [{:keys [session-id]} arguments
+        result (edit/get-zipper-info session-id)]
+    (case (:status result)
+      :success (let [current (:current-node result)
+                     parent (:parent result)
+                     children (:children result)
+                     siblings (:siblings result)
+                     ops (:available-operations result)]
+                 {:content [{:type "text" :text "Current zipper information:"}
+                           {:type "text" :text (format "Position: %s" (:position current))}
+                           {:type "text" :text (format "Node type: %s" (:node-type current))}
+                           {:type "text" :text (format "Expression: %s" (:sexpr current))}
+                           {:type "text" :text (format "Available operations: %s" (vec ops))}
+                           {:type "text" :text (format "Has parent: %s" (boolean parent))}
+                           {:type "text" :text (format "Children count: %s" (count children))}
+                           {:type "text" :text (format "Has left sibling: %s" (boolean (:left siblings)))}
+                           {:type "text" :text (format "Has right sibling: %s" (boolean (:right siblings)))}]})
+      :error   {:content [{:type "text" :text (format "✗ Error getting info: %s" (:error result))}]})))
 
 ;; =============================================================================
-;; EXTRACT/TRANSFORM TOOLS
+;; STRUCTURAL EDITING TOOLS - CORE OPERATIONS
 ;; =============================================================================
 
-(register-tool! :structural-extract-to-let
-  "Extract current expression to a let binding"
-  {:session-id {:type "string" :description "Session identifier"}
-   :binding-name {:type "string" :description "Name for the new binding"}}
-  (fn [tool-call context]
-    (let [{:strs [session-id binding-name]} (:args tool-call)]
-      (edit/extract-to-let session-id binding-name))))
+(defn structural-navigate-fn [_mcp-context arguments]
+  (let [{:keys [session-id direction steps]} arguments
+        steps (or steps 1)
+        result (edit/navigate session-id (keyword direction) :steps steps)]
+    (case (:status result)
+      :success {:content [{:type "text" :text (format "✓ Navigated %s (steps: %d)" direction steps)}
+                         {:type "text" :text (format "Current position: %s" 
+                           (get-in result [:info :current-node :sexpr]))}
+                         {:type "text" :text (format "Available operations: %s" 
+                           (vec (get-in result [:info :available-operations])))}]}
+      :error   {:content [{:type "text" :text (format "✗ Navigation failed: %s" (:error result))}]})))
 
-(register-tool! :structural-thread-first
-  "Convert expression to thread-first macro"
-  {:session-id {:type "string" :description "Session identifier"}}
-  (fn [tool-call context]
-    (let [{:strs [session-id]} (:args tool-call)]
-      (edit/thread-first session-id))))
+(defn structural-find-symbol-fn [_mcp-context arguments]
+  (let [{:keys [session-id symbol-name exact-match case-sensitive]} arguments
+        exact-match (if (nil? exact-match) false exact-match)
+        case-sensitive (if (nil? case-sensitive) true case-sensitive)
+        result (edit/find-by-symbol session-id symbol-name 
+                  :exact-match? exact-match :case-sensitive? case-sensitive)]
+    (case (:status result)
+      :success {:content [{:type "text" :text (format "✓ Found symbol '%s'" (:found result))}
+                         {:type "text" :text (format "Current expression: %s" 
+                           (get-in result [:info :current-node :sexpr]))}
+                         {:type "text" :text (format "Position: %s" 
+                           (get-in result [:info :current-node :position]))}]}
+      :error   {:content [{:type "text" :text (format "✗ Symbol not found: %s" (:error result))}]})))
 
-;; Tools are automatically registered by register-tool! function
+(defn structural-replace-node-fn [_mcp-context arguments]
+  (let [{:keys [session-id new-expression]} arguments
+        ;; Parse the new expression using rewrite-clj
+        parsed-node (try (z/node (z/of-string new-expression))
+                        (catch Exception e
+                          (throw (ex-info "Invalid expression syntax" {:expression new-expression :error (.getMessage e)}))))
+        result (edit/replace-node session-id parsed-node)]
+    (case (:status result)
+      :success {:content [{:type "text" :text "✓ Node replaced successfully"}
+                         {:type "text" :text (format "New expression: %s" 
+                           (get-in result [:info :current-node :sexpr]))}]}
+      :error   {:content [{:type "text" :text (format "✗ Replace failed: %s" (:error result))}]})))
+
+(defn structural-insert-after-fn [_mcp-context arguments]
+  (let [{:keys [session-id new-expression]} arguments
+        parsed-node (try (z/node (z/of-string new-expression))
+                        (catch Exception e
+                          (throw (ex-info "Invalid expression syntax" {:expression new-expression :error (.getMessage e)}))))
+        result (edit/insert-after session-id parsed-node)]
+    (case (:status result)
+      :success {:content [{:type "text" :text "✓ Expression inserted after current node"}
+                         {:type "text" :text (format "Inserted: %s" new-expression)}]}
+      :error   {:content [{:type "text" :text (format "✗ Insert failed: %s" (:error result))}]})))
+
+(defn structural-insert-before-fn [_mcp-context arguments]
+  (let [{:keys [session-id new-expression]} arguments
+        parsed-node (try (z/node (z/of-string new-expression))
+                        (catch Exception e
+                          (throw (ex-info "Invalid expression syntax" {:expression new-expression :error (.getMessage e)}))))
+        result (edit/insert-before session-id parsed-node)]
+    (case (:status result)
+      :success {:content [{:type "text" :text "✓ Expression inserted before current node"}
+                         {:type "text" :text (format "Inserted: %s" new-expression)}]}
+      :error   {:content [{:type "text" :text (format "✗ Insert failed: %s" (:error result))}]})))
+
+;; =============================================================================
+;; TOOL DEFINITIONS
+;; =============================================================================
+
+(def tools
+  "Structural editing tool definitions for mcp-toolkit"
+  [{:name "structural-create-session"
+    :description "Create a new structural editing session from file or code string"
+    :inputSchema {:type "object"
+                  :properties {:session-id {:type "string" :description "Unique identifier for the session"}
+                              :source {:type "string" :description "File path or code string to edit"}
+                              :from-file {:type "boolean" :description "Whether source is a file path (true) or code string (false)"}}
+                  :required ["session-id" "source"]}
+    :tool-fn structural-create-session-fn}
+   
+   {:name "structural-save-session"
+    :description "Save structural editing session to file or get as string"
+    :inputSchema {:type "object"
+                  :properties {:session-id {:type "string" :description "Session identifier"}
+                              :file-path {:type "string" :description "Optional file path to save to"}}
+                  :required ["session-id"]}
+    :tool-fn structural-save-session-fn}
+   
+   {:name "structural-close-session"
+    :description "Close a structural editing session"
+    :inputSchema {:type "object"
+                  :properties {:session-id {:type "string" :description "Session identifier"}}
+                  :required ["session-id"]}
+    :tool-fn structural-close-session-fn}
+   
+   {:name "structural-get-info"
+    :description "Get comprehensive information about current zipper position"
+    :inputSchema {:type "object"
+                  :properties {:session-id {:type "string" :description "Session identifier"}}
+                  :required ["session-id"]}
+    :tool-fn structural-get-info-fn}
+   
+   {:name "structural-list-sessions"
+    :description "List all active structural editing sessions"
+    :inputSchema {:type "object"
+                  :properties {}}
+    :tool-fn structural-list-sessions-fn}
+   
+   {:name "structural-find-symbol"
+    :description "Find symbols with matching including keywords and flexible patterns"
+    :inputSchema {:type "object"
+                  :properties {:session-id {:type "string" :description "Session identifier"}
+                              :symbol-name {:type "string" :description "Symbol name to find"}
+                              :exact-match {:type "boolean" :description "Whether to use exact matching"}
+                              :case-sensitive {:type "boolean" :description "Whether to use case-sensitive matching"}}
+                  :required ["session-id" "symbol-name"]}
+    :tool-fn structural-find-symbol-fn}
+   
+   {:name "structural-replace-node"
+    :description "Replace current node with new expression"
+    :inputSchema {:type "object"
+                  :properties {:session-id {:type "string" :description "Session identifier"}
+                              :new-expression {:type "string" :description "New expression to replace current node"}}
+                  :required ["session-id" "new-expression"]}
+    :tool-fn structural-replace-node-fn}
+   
+   {:name "structural-insert-after"
+    :description "Insert expression after current node with proper formatting"
+    :inputSchema {:type "object"
+                  :properties {:session-id {:type "string" :description "Session identifier"}
+                              :new-expression {:type "string" :description "New expression to insert after current node"}}
+                  :required ["session-id" "new-expression"]}
+    :tool-fn structural-insert-after-fn}
+   
+   {:name "structural-insert-before"
+    :description "Insert expression before current node with proper formatting"
+    :inputSchema {:type "object"
+                  :properties {:session-id {:type "string" :description "Session identifier"}
+                              :new-expression {:type "string" :description "New expression to insert before current node"}}
+                  :required ["session-id" "new-expression"]}
+    :tool-fn structural-insert-before-fn}
+   
+   {:name "structural-navigate"
+    :description "Navigate to different positions in the code structure"
+    :inputSchema {:type "object"
+                  :properties {:session-id {:type "string" :description "Session identifier"}
+                              :direction {:type "string" :description "Navigation direction: up, down, left, right, next, prev"}
+                              :steps {:type "number" :description "Number of steps to move (default: 1)"}}
+                  :required ["session-id" "direction"]}
+    :tool-fn structural-navigate-fn}])

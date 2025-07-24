@@ -1,8 +1,13 @@
 (ns is.simm.repl-mcp.tools.test-generation
-  (:require [is.simm.repl-mcp.interactive :refer [register-tool!]]
-            [clojure.string :as str]
-            [clojure.edn :as edn]
-            [taoensso.telemere :as log]))
+  "Test generation tools for Clojure functions"
+  (:require 
+   [clojure.string :as str]
+   [clojure.edn :as edn]
+   [taoensso.telemere :as log]))
+
+;; ===============================================
+;; Test Generation Functions  
+;; ===============================================
 
 (defn generate-test-skeleton
   "Generate a test skeleton for a given function"
@@ -63,17 +68,35 @@
       {:error (.getMessage e)
        :status :error})))
 
-;; Register the tool
-(register-tool! :create-test-skeleton
-  "Generate a comprehensive test skeleton for a Clojure function with multiple test cases and documentation"
-  {:function-name {:type "string" :description "Name of the function to create tests for"}
-   :namespace-name {:type "string" :description "Namespace containing the function"}
-   :test-namespace {:type "string" :optional true :description "Target test namespace (defaults to namespace-name + '-test')"}
-   :test-cases {:type "string" :optional true :description "JSON array of test cases with description, input, expected fields"}}
-  (fn [tool-call _context]
-    (let [{:strs [function-name namespace-name test-namespace test-cases]} (:args tool-call)]
-      (generate-test-skeleton function-name namespace-name 
-                             :test-namespace test-namespace 
-                             :test-cases (when test-cases 
-                                          (try (edn/read-string test-cases)
-                                               (catch Exception _ nil)))))))
+;; ===============================================
+;; Tool Implementations
+;; ===============================================
+
+(defn create-test-skeleton-tool [mcp-context arguments]
+  (let [{:keys [function-name namespace-name test-namespace test-cases]} arguments
+        result (generate-test-skeleton function-name namespace-name 
+                                     :test-namespace test-namespace 
+                                     :test-cases (when test-cases 
+                                                  (try (edn/read-string test-cases)
+                                                       (catch Exception _ nil))))]
+    {:content [{:type "text" 
+                :text (if (= (:status result) :success)
+                        (str "Generated test skeleton for " (:function-name result) ":\n\n"
+                             (:test-code result))
+                        (str "Error: " (:error result)))}]}))
+
+;; ===============================================
+;; Tool Definitions
+;; ===============================================
+
+(def tools
+  "Test generation tool definitions for mcp-toolkit"
+  [{:name "create-test-skeleton"
+    :description "Generate a comprehensive test skeleton for a Clojure function with multiple test cases and documentation"
+    :inputSchema {:type "object"
+                  :properties {:function-name {:type "string" :description "Name of the function to create tests for"}
+                              :namespace-name {:type "string" :description "Namespace containing the function"}
+                              :test-namespace {:type "string" :description "Target test namespace (defaults to namespace-name + '-test')"}
+                              :test-cases {:type "string" :description "JSON array of test cases with description, input, expected fields"}}
+                  :required ["function-name" "namespace-name"]}
+    :tool-fn create-test-skeleton-tool}])
