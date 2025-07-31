@@ -4,6 +4,7 @@
    [is.simm.repl-mcp.server :as server]
    [is.simm.repl-mcp.tools :as tools]
    [is.simm.repl-mcp.logging :as logging]
+   [is.simm.repl-mcp.transport.sse :as sse]
    [nrepl.server :as nrepl-server]
    [taoensso.telemere :as log]
    [clojure.tools.cli :as cli]
@@ -171,6 +172,15 @@
           (log/log! {:level :warn :msg "Error stopping nREPL server" 
                      :data {:error (.getMessage e)}}))))
     
+    ;; Stop HTTP server if running
+    (when-let [http-server (:http-server state)]
+      (try
+        (sse/stop-http-server! http-server)
+        (log/log! {:level :info :msg "HTTP server stopped"})
+        (catch Exception e
+          (log/log! {:level :warn :msg "Error stopping HTTP server" 
+                     :data {:error (.getMessage e)}}))))
+    
     ;; Close nREPL clients
     (when-let [instance (:instance state)]
       (when-let [nrepl-config (get-in instance [:config :nrepl-config])]
@@ -236,9 +246,17 @@
 
               :sse
               (do
-                (log/log! {:level :warn :msg "SSE transport not yet implemented in simplified version"})
-                (log/log! {:level :info :msg "Use STDIO transport for now"})
-                (exit 1 "SSE transport not implemented"))))
+                (log/log! {:level :info :msg "SSE MCP server ready" :data {:http-port (:http-port options)}})
+                ;; Start HTTP+SSE server
+                (let [instance (:instance @server-state)
+                      mcp-context {:session (:session instance)
+                                   :nrepl-client (:nrepl-client instance)}
+                      http-server (sse/start-http-server! mcp-context (:http-port options))]
+                  (swap! server-state assoc :http-server http-server)
+                  (log/log! {:level :info :msg "HTTP+SSE server started" 
+                             :data {:port (:http-port options) :url (str "http://127.0.0.1:" (:http-port options) "/sse")}})
+                  ;; Keep the main thread alive
+                  @(promise)))))
           (catch Exception e
             (log/log! {:level :error :msg "Failed to start simplified server"
                        :data {:error (.getMessage e)}})
