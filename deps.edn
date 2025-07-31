@@ -79,6 +79,7 @@
                       com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.6.1"}
 
                       org.slf4j/slf4j-api {:mvn/version "2.0.17"}
-                      org.slf4j/slf4j-nop {:mvn/version "2.0.17"}}
+                      org.slf4j/slf4j-nop {:mvn/version "2.0.17"}
+                      org.babashka/http-client {:mvn/version "0.4.19"}}
          :main-opts ["-m" "cognitect.test-runner"]
          :exec-fn cognitect.test-runner.api/test}}}
