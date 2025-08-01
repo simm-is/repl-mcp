@@ -27,3 +27,8 @@
 /checkouts
 /classes
 /target
+
+/clj-kondo
+/criterium
+/clj-async-profiler
+/refactor-nrepl

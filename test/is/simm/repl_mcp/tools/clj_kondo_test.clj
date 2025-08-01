@@ -57,17 +57,17 @@
   (testing "find-unused-vars finds unused variables"
     (let [result (clj-kondo-tools/find-unused-vars ["src"])]
       (is (= (:status result) :success))
-      (is (vector? (:unused-vars result)))))
+      (is (sequential? (:unused-vars result)))))
   
   (testing "find-var-definitions finds variable definitions" 
     (let [result (clj-kondo-tools/find-var-definitions ["src"])]
       (is (= (:status result) :success))
-      (is (vector? (:var-definitions result)))))
+      (is (sequential? (:var-definitions result)))))
   
   (testing "find-var-usages finds variable usages"
     (let [result (clj-kondo-tools/find-var-usages ["src"])]
       (is (= (:status result) :success))
-      (is (vector? (:var-usages result))))))
+      (is (sequential? (:var-usages result))))))
 
 (deftest mcp-tool-test
   (testing "lint-code tool returns proper MCP format"

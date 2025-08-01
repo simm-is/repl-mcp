@@ -55,8 +55,6 @@
           (when (seq (:content result))
             (let [content-text (:text (first (:content result)))]
               (is (string? content-text) "Should have text content")
-              (when (empty? content-text)
-                (println "DEBUG: Empty content-text, full result:" result))
               (is (str/includes? content-text "5") (str "Should contain evaluation result. Got: '" content-text "'"))))))
       
       ;; Test error handling
