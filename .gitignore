@@ -32,3 +32,6 @@
 /criterium
 /clj-async-profiler
 /refactor-nrepl
+/mcp-toolkit
+/datahike
+repl-mcp.log
