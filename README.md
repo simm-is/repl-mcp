@@ -92,7 +92,7 @@ Add `.vscode/mcp.json` to your project:
 }
 ```
 
-## Available Tools (51 Total)
+## Available Tools
 
 ### Core Development
 - **eval** - Evaluate Clojure code in the nREPL session
