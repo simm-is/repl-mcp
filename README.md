@@ -20,9 +20,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for Cl
 Add the `:repl-mcp` alias to your `deps.edn`:
 
 ```clojure
-{:deps {is.simm/repl-mcp {:git/url "https://github.com/simm-is/repl-mcp"
-                          :git/sha "latest-sha"}}
- :aliases
+{:aliases
  {:repl-mcp {:main-opts ["-m" "is.simm.repl-mcp"]
              :extra-paths ["test"] ;; If you want it to be able to run the tests
              ;; Option for clj-async-profiler
@@ -31,18 +29,7 @@ Add the `:repl-mcp` alias to your `deps.edn`:
                         "-XX:+DebugNonSafepoints"
                         "-XX:+EnableDynamicAgentLoading"
                         "--enable-native-access=ALL-UNNAMED"]
-             :extra-deps {nrepl/nrepl {:mvn/version "1.0.0"}
-                          cider/cider-nrepl {:mvn/version "0.47.1"}
-                          refactor-nrepl/refactor-nrepl {:mvn/version "3.10.0"}
-                          clj-kondo/clj-kondo {:mvn/version "2025.06.05"}
-                          rewrite-clj/rewrite-clj {:mvn/version "1.1.47"}
-                          dev.weavejester/cljfmt {:mvn/version "0.13.1"}
-                          ;; Performance analysis dependencies
-                          criterium/criterium {:mvn/version "0.4.6"}
-                          com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.6.1"}
-
-                          org.clojure/tools.cli {:mvn/version "1.1.230"}
-
+             :extra-deps {is.simm/repl-mcp {:git/url "https://github.com/simm-is/repl-mcp" :git/sha "latest-sha"}
                           org.slf4j/slf4j-api {:mvn/version "2.0.17"}
                           org.slf4j/slf4j-simple {:mvn/version "2.0.17"}}}}}
 ```
