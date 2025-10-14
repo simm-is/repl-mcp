@@ -1,8 +1,28 @@
 (ns is.simm.repl-mcp.tools.eval
   "Code evaluation tools for nREPL integration with safe nREPL interactions"
-  (:require 
+  (:require
    [taoensso.telemere :as log]
+   [clojure.string :as str]
    [is.simm.repl-mcp.tools.nrepl-utils :as nrepl-utils]))
+
+;; ===============================================
+;; Utility Functions
+;; ===============================================
+
+(defn normalize-param-key
+  "Convert parameter key from underscore (JSON) to hyphen (Clojure keyword).
+   Accepts both string and keyword inputs."
+  [k]
+  (keyword (str/replace (name k) "_" "-")))
+
+(defn normalize-params
+  "Normalize all parameter keys in a map by converting underscores to hyphens.
+   This handles the mismatch between JSON (underscores) and Clojure (hyphens)."
+  [params]
+  (reduce-kv (fn [m k v]
+               (assoc m (normalize-param-key k) v))
+             {}
+             params))
 
 ;; ===============================================
 ;; Core nREPL Helper Functions
@@ -44,21 +64,49 @@
 ;; ===============================================
 
 (defn eval-tool [mcp-context arguments]
-  (let [{:keys [code namespace timeout]} arguments]
-    (log/log! {:level :debug :msg "Eval tool called" :data {:code code :namespace namespace :timeout timeout}})
-    
-    (nrepl-utils/with-safe-nrepl mcp-context "Code evaluation"
-      (fn [nrepl-client timeout]
-        (evaluate-code nrepl-client code 
-                       :namespace namespace 
-                       :timeout timeout))
-      :timeout (or timeout 120000))))
+  (try
+    ;; Normalize parameter keys (though eval usually doesn't have underscores)
+    (let [normalized-args (normalize-params arguments)
+          {:keys [code namespace timeout]} normalized-args]
+      (log/log! {:level :debug :msg "Eval tool called" :data {:code code :namespace namespace :timeout timeout}})
+
+      ;; Validate that code was provided
+      (if (nil? code)
+        {:status :error
+         :error "Missing required parameter: code"
+         :details "The code parameter is required but was not provided"}
+        (nrepl-utils/with-safe-nrepl mcp-context "Code evaluation"
+          (fn [nrepl-client timeout]
+            (evaluate-code nrepl-client code
+                           :namespace namespace
+                           :timeout timeout))
+          :timeout (or timeout 120000))))
+    (catch Exception e
+      (log/log! {:level :error :msg "Error in eval-tool"
+                 :data {:error (.getMessage e) :arguments arguments}})
+      {:status :error
+       :error (.getMessage e)
+       :details (str "Exception type: " (.getName (class e)))})))
 
 (defn load-file-tool [mcp-context arguments]
-  (let [{:keys [file-path]} arguments]
-    (nrepl-utils/with-safe-nrepl mcp-context "File loading"
-      (fn [nrepl-client timeout]
-        (load-clojure-file nrepl-client file-path :timeout timeout)))))
+  (try
+    ;; Normalize parameter keys to handle both file_path and file-path
+    (let [normalized-args (normalize-params arguments)
+          {:keys [file-path]} normalized-args]
+      ;; Validate that file-path was provided
+      (if (nil? file-path)
+        {:status :error
+         :error "Missing required parameter: file-path"
+         :details "The file-path parameter is required but was not provided"}
+        (nrepl-utils/with-safe-nrepl mcp-context "File loading"
+          (fn [nrepl-client timeout]
+            (load-clojure-file nrepl-client file-path :timeout timeout)))))
+    (catch Exception e
+      (log/log! {:level :error :msg "Error in load-file-tool"
+                 :data {:error (.getMessage e) :arguments arguments}})
+      {:status :error
+       :error (.getMessage e)
+       :details (str "Exception type: " (.getName (class e)))})))
 
 ;; ===============================================
 ;; Tool Definitions

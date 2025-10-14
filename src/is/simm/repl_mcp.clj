@@ -101,8 +101,21 @@
             (do
               (log/log! {:level :debug :msg "Parsed JSON message" :data {:message message}})
               (log/log! {:level :debug :msg "Calling json-rpc/handle-message" :data {:context-keys (keys context)}})
-              (json-rpc/handle-message context message)
-              (log/log! {:level :debug :msg "Finished json-rpc/handle-message"})
+              (try
+                (json-rpc/handle-message context message)
+                (log/log! {:level :debug :msg "Finished json-rpc/handle-message"})
+                (catch Exception e
+                  (log/log! {:level :error :msg "Error handling message"
+                             :data {:error (.getMessage e)
+                                    :message message
+                                    :exception-type (.getName (class e))}})
+                  ;; Send error response if message has an ID
+                  (when-let [msg-id (:id message)]
+                    (send-message {:jsonrpc "2.0"
+                                   :id msg-id
+                                   :error {:code -32603
+                                          :message "Internal error"
+                                          :data {:error (.getMessage e)}}}))))
               (recur))))))))
 
 (defn start-nrepl-server!
