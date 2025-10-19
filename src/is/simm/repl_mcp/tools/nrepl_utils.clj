@@ -87,18 +87,22 @@
 ;; ===============================================
 
 (defn process-eval-response
-  "Process evaluation response with combined values and output"
+  "Process evaluation response with combined values and output.
+   Returns values as strings without deserializing them via read-string,
+   avoiding issues with unreadable representations like #object."
   [responses]
-  (let [values (nrepl/response-values responses)
-        combined (nrepl/combine-responses responses)]
+  (let [combined (nrepl/combine-responses responses)
+        ;; Extract :value directly from combined response (it's a vector of strings)
+        ;; Don't use nrepl/response-values as it calls read-string which fails on #object
+        values (:value combined)]
     (cond
-      (:err combined) 
+      (:err combined)
       {:status :error
        :error (str (:err combined)
                    (when-let [output (:out combined)]
                      (str "\nOutput: " output)))}
-      
-      :else 
+
+      :else
       {:status :success
        :value (str (first values)
                    (when-let [output (:out combined)]
