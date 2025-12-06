@@ -90,14 +90,15 @@
 
 (defn handle-message-response [session message]
   (let [context (assoc (:session/context session)
-                       :send-message (make-send-message session))]
+                       :send-message (make-send-message session)
+                       :connection-id (:session/session-id session))]
     (log/log! {:level :debug :msg "SSE accepted message" :data {:message message}})
     (json-rpc/handle-message context message))
   {:status 202
    :headers {"content-type" "text/plain"}
    :body "Accepted"})
 
-(defn handle-sse-stream [mcp-context req]
+(defn handle-sse-stream [context-factory req]
   (if-let [error-response (validate-request req)]
     error-response
     (let [session-id (new-session-id)]
@@ -106,7 +107,8 @@
                             (fn [channel]
                               (log/log! {:level :info :msg "SSE connection opened" 
                                          :data {:session-id session-id}})
-                              (let [{:session/keys [send!]} (assoc-session! 
+                              (let [mcp-context (context-factory)
+                                    {:session/keys [send!]} (assoc-session!
                                                               session-id 
                                                               channel
                                                               mcp-context)]
@@ -127,18 +129,18 @@
         (error-response "Could not parse message" 400))
       (error-response "Session not found" 404))))
 
-(defn routes [mcp-context]
+(defn routes [context-factory]
   [""
-   ["/sse" {:get (partial handle-sse-stream mcp-context)}]
+   ["/sse" {:get (partial handle-sse-stream context-factory)}]
    ["/messages/:id" {:post handle-messages}]])
 
-(defn create-ring-handler [mcp-context]
+(defn create-ring-handler [context-factory]
   (reitit/ring-handler
-   (reitit/router (routes mcp-context))))
+   (reitit/router (routes context-factory))))
 
-(defn start-http-server! [mcp-context port]
+(defn start-http-server! [context-factory port]
   (log/log! {:level :info :msg "Starting HTTP+SSE server" :data {:port port}})
-  (let [handler (create-ring-handler mcp-context)]
+  (let [handler (create-ring-handler context-factory)]
     (http-kit/run-server handler {:port port :legacy-return-value? false})))
 
 (defn stop-http-server! [server]

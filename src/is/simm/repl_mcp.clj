@@ -159,9 +159,10 @@
           ;; Start HTTP server if transport is SSE
           http-server (when (= (:transport config) :sse)
                         (log/log! {:level :info :msg "Initializing SSE HTTP server" :data {:port (:http-port config)}})
-                        (let [mcp-context {:session (:session instance)
-                                           :nrepl-client (:nrepl-client instance)}]
-                          (sse/start-http-server! mcp-context (:http-port config))))]
+                        (let [context-factory (fn []
+                                                (log/log! {:level :info :msg "Creating new session for SSE connection"})
+                                                (:context (server/create-mcp-server-instance! instance-config)))]
+                          (sse/start-http-server! context-factory (:http-port config))))]
 
       (when http-server
         (log/log! {:level :info :msg "HTTP+SSE server started"

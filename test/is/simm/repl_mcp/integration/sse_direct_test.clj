@@ -11,14 +11,15 @@
   (testing "Direct server creation and HTTP test"
     
     ;; Create server instance without nREPL dependency
-    (let [instance (server/create-mcp-server-instance!
-                    {:tools (tools/get-tool-definitions)
-                     :server-info {:name "direct-sse-server" :version "1.0.0"}})
-          mcp-context {:session (:session instance)
-                       :nrepl-client nil} ; No nREPL for this test
+    (let [context-factory (fn []
+                           (let [instance (server/create-mcp-server-instance!
+                                           {:tools (tools/get-tool-definitions)
+                                            :server-info {:name "direct-sse-server" :version "1.0.0"}})]
+                             {:session (:session instance)
+                              :nrepl-client nil})) ; No nREPL for this test
           test-port 18491]
       
-      (let [http-server (sse/start-http-server! mcp-context test-port)]
+      (let [http-server (sse/start-http-server! context-factory test-port)]
         
         (try
           (Thread/sleep 2000)
