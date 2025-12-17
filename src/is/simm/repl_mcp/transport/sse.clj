@@ -59,11 +59,40 @@
 
 (defn channel-send! [channel event data]
   (let [message (str "event: " event "\ndata: " data "\n\n")]
-    (log/log! {:level :info :msg "Sending SSE message" 
-               :data {:event event :data data :message message}})
+    (when-not (= event "ping")
+      (log/log! {:level :info :msg "Sending SSE message"
+                 :data {:event event :data data :message message}}))
     (http-kit/send! channel message false)))
 
 (defonce connections (atom {}))
+
+;; Heartbeat mechanism
+(def heartbeat-interval 15000)
+(defonce heartbeat-running? (atom false))
+(defonce heartbeat-future (atom nil))
+
+(defn start-heartbeat-loop! []
+  (reset! heartbeat-running? true)
+  (reset! heartbeat-future
+    (future
+      (log/log! {:level :info :msg "Starting SSE heartbeat loop"})
+      (loop []
+        (when @heartbeat-running?
+          (Thread/sleep heartbeat-interval)
+          (doseq [[session-id session-data] @connections]
+            (try
+              (channel-send! (:session/channel session-data) "ping" "{}")
+              (catch Exception e
+                (log/log! {:level :error :msg "Error sending heartbeat"
+                           :data {:session-id session-id :error (.getMessage e)}}))))
+          (recur))))))
+
+(defn stop-heartbeat-loop! []
+  (reset! heartbeat-running? false)
+  (when-let [f @heartbeat-future]
+    (future-cancel f)
+    (reset! heartbeat-future nil))
+  (log/log! {:level :info :msg "Stopped SSE heartbeat loop"}))
 
 (defn new-session-id [] 
   (str (java.util.UUID/randomUUID)))
@@ -90,23 +119,25 @@
 
 (defn handle-message-response [session message]
   (let [context (assoc (:session/context session)
-                       :send-message (make-send-message session))]
+                       :send-message (make-send-message session)
+                       :connection-id (:session/session-id session))]
     (log/log! {:level :debug :msg "SSE accepted message" :data {:message message}})
     (json-rpc/handle-message context message))
   {:status 202
    :headers {"content-type" "text/plain"}
    :body "Accepted"})
 
-(defn handle-sse-stream [mcp-context req]
+(defn handle-sse-stream [context-factory req]
   (if-let [error-response (validate-request req)]
     error-response
     (let [session-id (new-session-id)]
       (http-kit/as-channel req
                            {:on-open
                             (fn [channel]
-                              (log/log! {:level :info :msg "SSE connection opened" 
+                              (log/log! {:level :info :msg "SSE connection opened"
                                          :data {:session-id session-id}})
-                              (let [{:session/keys [send!]} (assoc-session! 
+                              (let [mcp-context (context-factory)
+                                    {:session/keys [send!]} (assoc-session!
                                                               session-id 
                                                               channel
                                                               mcp-context)]
@@ -114,7 +145,7 @@
                                 (send! "endpoint" (str "/messages/" session-id))))
                             :on-close
                             (fn [_channel status]
-                              (log/log! {:level :info :msg "SSE connection closed" 
+                              (log/log! {:level :info :msg "SSE connection closed"
                                          :data {:status status :session-id session-id}})
                               (dissoc-session! session-id))}))))
 
@@ -127,22 +158,24 @@
         (error-response "Could not parse message" 400))
       (error-response "Session not found" 404))))
 
-(defn routes [mcp-context]
+(defn routes [context-factory]
   [""
-   ["/sse" {:get (partial handle-sse-stream mcp-context)}]
+   ["/sse" {:get (partial handle-sse-stream context-factory)}]
    ["/messages/:id" {:post handle-messages}]])
 
-(defn create-ring-handler [mcp-context]
+(defn create-ring-handler [context-factory]
   (reitit/ring-handler
-   (reitit/router (routes mcp-context))))
+   (reitit/router (routes context-factory))))
 
-(defn start-http-server! [mcp-context port]
+(defn start-http-server! [context-factory port]
   (log/log! {:level :info :msg "Starting HTTP+SSE server" :data {:port port}})
-  (let [handler (create-ring-handler mcp-context)]
+  (start-heartbeat-loop!)
+  (let [handler (create-ring-handler context-factory)]
     (http-kit/run-server handler {:port port :legacy-return-value? false})))
 
 (defn stop-http-server! [server]
   (when server
     (log/log! {:level :info :msg "Stopping HTTP+SSE server"})
+    (stop-heartbeat-loop!)
     (http-kit/server-stop! server {:timeout 100})
     (reset! connections {})))

@@ -154,21 +154,35 @@
                           :nrepl-config {:port (:nrepl-port config)
                                         :ip "127.0.0.1"}
                           :server-info {:name "repl-mcp-simple" :version "1.0.0"}}
-          
           ;; Create instance directly - no complex lifecycle management
-          instance (server/create-mcp-server-instance! instance-config)]
-      
+          instance (server/create-mcp-server-instance! instance-config)
+          ;; Start HTTP server if transport is SSE
+          http-server (when (= (:transport config) :sse)
+                        (log/log! {:level :info :msg "Initializing SSE HTTP server" :data {:port (:http-port config)}})
+                        (let [context-factory (fn []
+                                                (log/log! {:level :info :msg "Creating new session for SSE connection"})
+                                                (:context (server/create-mcp-server-instance! instance-config)))]
+                          (sse/start-http-server! context-factory (:http-port config))))]
+
+      (when http-server
+        (log/log! {:level :info :msg "HTTP+SSE server started"
+                   :data {:port (:http-port config) :url (str "http://127.0.0.1:" (:http-port config) "/sse")}}))
+
       ;; Store state for cleanup
       (reset! server-state {:nrepl-server nrepl-server
                            :instance instance
+                           :http-server http-server
                            :config config})
-      
+
       (log/log! {:level :info :msg "Simplified repl-mcp server started successfully" 
                  :data {:transport (:transport config)
                         :nrepl-port (:nrepl-port config)
-                        :tool-count (count (tools/get-tool-definitions))}})
-      
-      {:nrepl-server nrepl-server :instance instance})))
+                        :tool-count (count (tools/get-tool-definitions))
+                        :http-port (when http-server (:http-port config))}})
+
+      {:nrepl-server nrepl-server
+       :instance instance
+       :http-server http-server})))
 
 (defn stop-mcp-server!
   "Stop the simplified MCP server"
@@ -260,16 +274,8 @@
               :sse
               (do
                 (log/log! {:level :info :msg "SSE MCP server ready" :data {:http-port (:http-port options)}})
-                ;; Start HTTP+SSE server
-                (let [instance (:instance @server-state)
-                      mcp-context {:session (:session instance)
-                                   :nrepl-client (:nrepl-client instance)}
-                      http-server (sse/start-http-server! mcp-context (:http-port options))]
-                  (swap! server-state assoc :http-server http-server)
-                  (log/log! {:level :info :msg "HTTP+SSE server started" 
-                             :data {:port (:http-port options) :url (str "http://127.0.0.1:" (:http-port options) "/sse")}})
-                  ;; Keep the main thread alive
-                  @(promise)))))
+                ;; Keep the main thread alive - HTTP server started in start-mcp-server!
+                @(promise))))
           (catch Exception e
             (log/log! {:level :error :msg "Failed to start simplified server"
                        :data {:error (.getMessage e)}})
